@@ -1,0 +1,31 @@
+# Day 16 — Full detail sooner after zooming
+
+## Problem (reported)
+
+Zooming in showed the enlarged screen-size version for a long time, not the original pixels.
+
+## Cause (timing.csv of 26 Sept, 108 MP photos 12000 x 9000)
+
+| step | time |
+|---|---|
+| pause before the full decode | 0.7 s (RefineDelayMs; skipped when zooming) |
+| full decode, WIC | ~1.0 s |
+| screen copy of the full image | ~1.2 s |
+| GPU upload | ~0.6 s per 2048 x 2048 tile, 30 tiles: ~18 s |
+
+The upload ran at about 35 MB/s. Until all tiles were on the GPU, only the small version was drawn.
+
+## Changes
+
+- Mipmaps are made by the GPU with glGenerateMipmap after each tile (loaded at run time; the old automatic GL_GENERATE_MIPMAP only as fallback, marked "(old mipmaps)" in the D line). Suspected cause of the slow uploads.
+- Each tile is timed (glFinish): the D line shows "per tile: pixels x + mipmaps y ms", and "sharpening n / N" while the full image goes up. This tells whether the fix worked and, if not, which part is slow.
+- Tiles are 1024 x 1024 (was 2048): finer steps per frame.
+- Visible first: the tile nearest to the middle of the view goes up next.
+- Progressive: tiles already on the GPU are drawn over the small version at once, so the view sharpens tile by tile instead of switching at the end.
+- Screen copy: the block average samples at most 4 x 4 points per block (about 7x faster for 108 MP).
+- RefineDelayMs default 250 ms (was 700). An existing MView.ini keeps its value: set `[Performance] RefineDelayMs=250` (or 0 = full decode at once).
+
+## To check
+
+D line on a 108 MP photo after zooming in: "sharpening n / 108", the per-tile times, and how quickly the middle becomes sharp. timing.csv: screen_copy_ms of the `full` rows (was ~1200).
+If "mipmaps" per tile is still large, or "pixels" is large: next step is to try other upload formats (GL_UNSIGNED_INT_8_8_8_8_REV) or a pixel buffer object.

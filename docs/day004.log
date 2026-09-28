@@ -1,0 +1,371 @@
+============================================================
+Session 004
+Date: 2026-07-13
+
+Project: MView
+
+Theme
+-----
+
+From application skeleton to navigation architecture.
+
+The focus shifted from writing classes to defining
+responsibilities and startup behaviour.
+
+============================================================
+Achievements
+============================================================
+
+✓ TMView separated from TMainForm.
+
+✓ TMView moved to
+
+    source\core\uMView.pas
+
+✓ TNavigator created as an independent subsystem.
+
+✓ Project compiles successfully.
+
+✓ Ownership hierarchy established.
+
+============================================================
+Current Architecture
+============================================================
+
+Windows
+
+    │
+
+    ▼
+
+TMainForm
+
+    │
+
+    ▼
+
+TMView
+
+    │
+
+    ├── TConfig
+
+    └── TNavigator
+
+Future
+
+TMView
+
+    │
+
+    ├── TConfig
+
+    ├── TNavigator
+
+    ├── TRenderer
+
+    ├── TMouseEngine
+
+    └── ...
+
+============================================================
+Important Design Decisions
+============================================================
+
+Decision 0002
+
+TMView shall never depend on the Windows GUI.
+
+The GUI owns TMView.
+
+TMView does not know TMainForm.
+
+This cleanly separates
+
+Presentation Layer
+
+from
+
+Application Layer.
+
+============================================================
+Navigator Responsibilities
+============================================================
+
+TNavigator owns the navigation state.
+
+Current members
+
+    FCurrentDirectory
+
+    FCurrentImage
+
+    FSortMode
+
+Responsibilities
+
+• Current directory
+
+• Current image
+
+• Navigation state
+
+• Directory traversal
+
+• Image traversal
+
+Does NOT
+
+• Display images
+
+• Load images
+
+• Handle mouse input
+
+• Cache images
+
+============================================================
+Subsystem Hierarchy
+============================================================
+
+Rather than making TMView own everything directly,
+helper classes belong to TNavigator.
+
+TMView
+
+    │
+
+    ▼
+
+TNavigator
+
+    │
+
+    ├── TDirectoryTree
+
+    └── TDirectoryImages
+
+This reduces coupling and gives each subsystem a
+single responsibility.
+
+============================================================
+Naming Decision
+============================================================
+
+The originally proposed
+
+    TImageList
+
+was renamed to
+
+    TDirectoryImages
+
+Reason
+
+Lazarus already provides a class called TImageList.
+
+Avoiding the same name prevents confusion and keeps the
+source code self-explanatory.
+
+============================================================
+Professional Design Principle
+============================================================
+
+When deciding where something belongs, ask
+
+    "Who owns this information?"
+
+instead of
+
+    "Where can I store this variable?"
+
+Examples
+
+Current image
+
+    belongs to
+
+        TNavigator
+
+Current zoom
+
+    belongs to
+
+        TRenderer
+
+Configuration
+
+    belongs to
+
+        TConfig
+
+============================================================
+Major Architectural Breakthrough
+============================================================
+
+Observation
+
+Hamana starts almost instantly when an image is
+double-clicked from Total Commander.
+
+The first image appears immediately.
+
+Only afterwards does the program prepare navigation.
+
+Conclusion
+
+MView shall follow the same philosophy.
+
+Old startup idea
+
+Open
+
+↓
+
+Scan directories
+
+↓
+
+Build tree
+
+↓
+
+Show first image
+
+Rejected.
+
+New startup model
+
+Open image
+
+↓
+
+Display immediately
+
+↓
+
+Background initialization
+
+↓
+
+Current directory scan
+
+↓
+
+Recursive directory tree
+
+↓
+
+Image preload
+
+↓
+
+Navigation becomes progressively available
+
+============================================================
+Startup Philosophy
+============================================================
+
+The first image always has priority.
+
+Everything else happens afterwards.
+
+This maximizes perceived performance.
+
+============================================================
+Future Startup Phases
+============================================================
+
+Phase 1
+
+Immediate
+
+• Load requested image.
+
+• Display image.
+
+Phase 2
+
+Fast
+
+• Scan current directory.
+
+• Build TDirectoryImages.
+
+Phase 3
+
+Background
+
+• Build recursive TDirectoryTree.
+
+Phase 4
+
+Background
+
+• Start image preloading.
+
+============================================================
+Project Philosophy Reinforced
+============================================================
+
+Professional software minimizes startup latency.
+
+Initialization should be progressive.
+
+The user should never wait for data that is not yet
+needed.
+
+============================================================
+Object-Oriented Concepts Learned
+============================================================
+
+Fields
+
+A field is a variable owned by an object.
+
+Object ownership
+
+The object creating another object is normally
+responsible for destroying it.
+
+Hierarchy
+
+TMView owns TNavigator.
+
+TNavigator owns TDirectoryTree and TDirectoryImages.
+
+============================================================
+Current Status
+============================================================
+
+Compiling successfully.
+
+Project architecture stable.
+
+Subsystem responsibilities becoming clearly defined.
+
+Ready to begin implementing navigation behaviour.
+
+============================================================
+Next Session
+============================================================
+
+Design and implement
+
+    TDirectoryTree
+
+Goals
+
+• Recursive directory scan.
+
+• Internal tree representation.
+
+• Efficient next/previous directory navigation.
+
+No rendering yet.
+
+No image loading beyond the initial image.
+
+Architecture remains the priority.
+
+============================================================

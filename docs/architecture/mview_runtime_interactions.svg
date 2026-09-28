@@ -1,0 +1,263 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2380" height="1440" viewBox="0 0 2380 1440" font-family="Segoe UI, Helvetica, Arial, sans-serif" xmlns:c2pa="http://c2pa.org/manifest"><metadata><c2pa:manifest>AAAWgmp1bWIAAAAeanVtZGMycGEAEQAQgAAAqgA4m3EDYzJwYQAAABZcanVtYgAAAEdqdW1kYzJtYQARABCAAACqADibcQN1cm46YzJwYTo4MTg1NTI1ZC02MGE5LTRlYzEtYjViOC05YmEyYTcyOTVmNmMAAAADl2p1bWIAAAApanVtZGMyYXMAEQAQgAAAqgA4m3EDYzJwYS5hc3NlcnRpb25zAAAAALxqdW1iAAAARGp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuaW5ncmVkaWVudC52MwAAAAAYYzJzaKV4HLLBJz8Z/W5V8QiAruQAAABwY2JvcqNpZGM6Zm9ybWF0bWltYWdlL3N2Zyt4bWxqaW5zdGFuY2VJRHgseG1wOmlpZDo3NjMxMWM5Mi0yZGRjLTQ3YjktODNhMy01MWE4MDAxNTY5NTZscmVsYXRpb25zaGlwaHBhcmVudE9mAAAB4mp1bWIAAABBanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5hY3Rpb25zLnYyAAAAABhjMnNokzG1+3Ti9LYzjxL5AhGrPwAAAZljYm9yomdhY3Rpb25zgqJmYWN0aW9ua2MycGEub3BlbmVkanBhcmFtZXRlcnOha2luZ3JlZGllbnRzgaJjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFggPvkdHvoJjArFzVCpwTRwjj0Lts4+gc77Tr7oT5nhf3WkZmFjdGlvbngdY29tLmFudGhyb3BpYy5jbGF1ZGUucHJvdmlkZWRqcGFyYW1ldGVyc6F4H2NvbS5hbnRocm9waWMub3JpZ2luLWNvbmZpZGVuY2VndW5rbm93bmtkZXNjcmlwdGlvbnhmQ2xhdWRlIHByb3ZpZGVkIHRoaXMgZmlsZSBhdCB0aGUgcmVxdWVzdCBvZiBhIHVzZXIgYW5kIG1heSBoYXZlIGNyZWF0ZWQgb3IgbW9kaWZpZWQgdGhlIGZpbGUgY29udGVudHMubXNvZnR3YXJlQWdlbnShZG5hbWVmQ2xhdWRlcmFsbEFjdGlvbnNJbmNsdWRlZPUAAADIanVtYgAAAEBqdW1kY2JvcgARABCAAACqADibcRNjMnBhLmhhc2guZGF0YQAAAAAYYzJzaCr8PJlhCagzMNArumD3GYAAAACAY2JvcqVjYWxnZnNoYTI1NmNwYWRNAAAAAAAAAAAAAAAAAGRoYXNoWCBwFoLodLDbOXKA9TNLMFitjBuj74MrKeMoG3VmMNaaCWRuYW1lbmp1bWJmIG1hbmlmZXN0amV4Y2x1c2lvbnOBomVzdGFydBjPZmxlbmd0aBkeBAAAAj5qdW1iAAAAJ2p1bWRjMmNsABEAEIAAAKoAOJtxA2MycGEuY2xhaW0udjIAAAACD2Nib3KlY2FsZ2ZzaGEyNTZpc2lnbmF0dXJleE1zZWxmI2p1bWJmPS9jMnBhL3VybjpjMnBhOjgxODU1MjVkLTYwYTktNGVjMS1iNWI4LTliYTJhNzI5NWY2Yy9jMnBhLnNpZ25hdHVyZWppbnN0YW5jZUlEeCx4bXA6aWlkOmQzMjE5MTNhLWZkMDItNGYyYy04OWQ4LTc5MmYxOTkwNWMxZHJjcmVhdGVkX2Fzc2VydGlvbnODomN1cmx4LXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaW5ncmVkaWVudC52M2RoYXNoWCA++R0e+gmMCsXNUKnBNHCOPQu2zj6BzvtOvuhPmeF/daJjdXJseCpzZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmFjdGlvbnMudjJkaGFzaFggNotEqMpOfT8sNYC90zdmnvkCa/aWBZC4NwV4m7/+onCiY3VybHgpc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5oYXNoLmRhdGFkaGFzaFggt2gQD3NpvFyj6tp67w3IQo8BIktAJSqIpGr5P1te4ox0Y2xhaW1fZ2VuZXJhdG9yX2luZm+jZG5hbWVvQW50aHJvcGljIEZpbGVzZ3ZlcnNpb25lMS4wLjBrc3BlY1ZlcnNpb25lMi40LjAAABA4anVtYgAAAChqdW1kYzJjcwARABCAAACqADibcQNjMnBhLnNpZ25hdHVyZQAAABAIY2JvctKEWQISogEmGCFZAgowggIGMIIBjaADAgECAhRA5aAK7sI50L64g/oGQgU9Z1UTADAKBggqhkjOPQQDAzBJMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEuMCwGA1UEAxMlQW50aHJvcGljIENvbnRlbnQgQ3JlZGVudGlhbHMgUm9vdCBDQTAeFw0yNjA4MDcxODQzNTZaFw0yODA4MDYxOTQzNTZaMEQxFzAVBgNVBAoTDkFudGhyb3BpYywgUEJDMSkwJwYDVQQDEyBBbnRocm9waWMgQ2xhdWRlIENvbnRlbnQgU2lnbmluZzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJh6CmvLUBgFFNU0vUKlOVtE6djd17L5SuwX0LemFisBM3dkd/3cyjxFA3Qo5S46fX0/ihY0VZ7mfb9KF703t5OjWDBWMA4GA1UdDwEB/wQEAwIHgDAVBgNVHSUEDjAMBgorBgEEAYPoXgIBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUzlHiBIFOZFsj+OPEz5o+nMHXXMIwCgYIKoZIzj0EAwMDZwAwZAIwMXMdFJ4BetLLVY7ORuE9noqbbAZOZn/aArXyTwFAZfKrPzxF2vPoJNf1+UCdg1XGAjBwX1zd9WGqYkqmL5SFqw1QySjr1zJfpJM9+1rdDwSPLMOPOjKuiXjoU/pUUeG9RwmhY3BhZFkNngAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPZYQBQoJ2XiRq9BbzeIhRwwUKQbMc3WfNeeTNoEfceZrO48wqlcTR1LnhNeUNySo/NC7tBCG6LBMwKRt7IcPxpTZOw=</c2pa:manifest></metadata>
+<defs>
+<marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#374151"/></marker>
+<marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/></marker>
+<marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b45309"/></marker>
+<marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9ca3af"/></marker>
+<marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/></marker>
+</defs>
+<rect width="2380" height="1440" fill="#ffffff"/>
+<text x="40" y="52" font-size="28" font-weight="700" fill="#1f2937">MView — how the units work together at run time</text>
+<text x="40" y="84" font-size="15" fill="#4b5563">Bands are threads. Only the UI thread touches the window; the other threads hand results back with TThread.Queue (blue). Numbers follow the path of one image, from a mouse click to the screen.</text>
+<rect x="20" y="110" width="1940" height="120" rx="12" fill="#f9fafb" stroke="#e5e7eb"/>
+<text x="36" y="136" font-size="15" font-weight="700" fill="#6b7280">Input</text>
+<rect x="20" y="240" width="1940" height="560" rx="12" fill="#f3f6fb" stroke="#e5e7eb"/>
+<text x="36" y="266" font-size="15" font-weight="700" fill="#6b7280">UI thread (main)</text>
+<rect x="20" y="815" width="1940" height="150" rx="12" fill="#f2f9fa" stroke="#e5e7eb"/>
+<text x="36" y="841" font-size="15" font-weight="700" fill="#6b7280">Scanner thread</text>
+<rect x="20" y="980" width="1940" height="250" rx="12" fill="#f3f8f4" stroke="#e5e7eb"/>
+<text x="36" y="1006" font-size="15" font-weight="700" fill="#6b7280">Decode workers (1 to 4)</text>
+<rect x="20" y="1245" width="1940" height="150" rx="12" fill="#f9f7f3" stroke="#e5e7eb"/>
+<text x="36" y="1271" font-size="15" font-weight="700" fill="#6b7280">Other threads</text>
+<rect x="60" y="150" width="250" height="66" rx="9" fill="#FFFFFF" stroke="#6b7280" stroke-width="1.8"/>
+<text x="72" y="174" font-size="15.5" font-weight="700" fill="#6b7280">Mouse and keyboard</text>
+<text x="72" y="194" font-size="12.2" fill="#374151">buttons, wheel, tilt, gestures,</text>
+<text x="72" y="211" font-size="12.2" fill="#374151">Space / Enter / D / Esc / arrows</text>
+<rect x="60" y="290" width="250" height="100" rx="9" fill="#FCEBDD" stroke="#A65A1E" stroke-width="1.8"/>
+<text x="72" y="314" font-size="15.5" font-weight="700" fill="#A65A1E">TMediaView / TGLMediaView</text>
+<text x="72" y="334" font-size="12.2" fill="#374151">drawing surface (CPU / OpenGL)</text>
+<text x="72" y="351" font-size="12.2" fill="#374151">uMediaView, uGLMediaView</text>
+<text x="72" y="368" font-size="12.2" fill="#374151">gets raw input, calls Paint</text>
+<rect x="390" y="290" width="260" height="100" rx="9" fill="#F0E6F6" stroke="#6E3F8C" stroke-width="1.8"/>
+<text x="402" y="314" font-size="15.5" font-weight="700" fill="#6E3F8C">TMouseEngine</text>
+<text x="402" y="334" font-size="12.2" fill="#374151">zones, clicks, gestures -&gt; TCommand</text>
+<text x="402" y="351" font-size="12.2" fill="#374151">reads TMouseProfile (Default.mouse)</text>
+<text x="402" y="368" font-size="12.2" fill="#374151">uMouseEngine, uMouseProfile</text>
+<rect x="730" y="290" width="250" height="100" rx="9" fill="#FBE3E1" stroke="#A8322D" stroke-width="1.8"/>
+<text x="742" y="314" font-size="15.5" font-weight="700" fill="#A8322D">TMainForm</text>
+<text x="742" y="334" font-size="12.2" fill="#374151">menu, fullscreen, cursor</text>
+<text x="742" y="351" font-size="12.2" fill="#374151">viewer &lt;-&gt; settings screen</text>
+<text x="742" y="368" font-size="12.2" fill="#374151">uMainForm</text>
+<rect x="1050" y="270" width="330" height="140" rx="9" fill="#E3EAF7" stroke="#2F5597" stroke-width="1.8"/>
+<text x="1062" y="294" font-size="15.5" font-weight="700" fill="#2F5597">TMView  (the viewer)</text>
+<text x="1062" y="314" font-size="12.2" fill="#374151">Execute(command): browse, zoom, modes,</text>
+<text x="1062" y="331" font-size="12.2" fill="#374151">edit / crop, paste, save</text>
+<text x="1062" y="348" font-size="12.2" fill="#374151">asks the scheduler for the wanted images</text>
+<text x="1062" y="365" font-size="12.2" fill="#374151">takes results: cache + renderer</text>
+<text x="1062" y="382" font-size="12.2" fill="#374151">uMView</text>
+<rect x="60" y="520" width="250" height="110" rx="9" fill="#FCEBDD" stroke="#A65A1E" stroke-width="1.8"/>
+<text x="72" y="544" font-size="15.5" font-weight="700" fill="#A65A1E">TRenderer / TGLRenderer</text>
+<text x="72" y="564" font-size="12.2" fill="#374151">zoom, pan, rotation, overlays</text>
+<text x="72" y="581" font-size="12.2" fill="#374151">info + diagnostics lines</text>
+<text x="72" y="598" font-size="12.2" fill="#374151">uRenderer, uGLRenderer</text>
+<rect x="390" y="520" width="260" height="110" rx="9" fill="#FBF3D2" stroke="#8A6D0B" stroke-width="1.8"/>
+<text x="402" y="544" font-size="15.5" font-weight="700" fill="#8A6D0B">TConfig</text>
+<text x="402" y="564" font-size="12.2" fill="#374151">MView.ini as typed settings</text>
+<text x="402" y="581" font-size="12.2" fill="#374151">read by TMView at start,</text>
+<text x="402" y="598" font-size="12.2" fill="#374151">saved on exit — uConfig</text>
+<rect x="730" y="520" width="250" height="110" rx="9" fill="#FBF3D2" stroke="#8A6D0B" stroke-width="1.8"/>
+<text x="742" y="544" font-size="15.5" font-weight="700" fill="#8A6D0B">Settings screen</text>
+<text x="742" y="564" font-size="12.2" fill="#374151">TIniEditor + "Mouse &amp; keys" page</text>
+<text x="742" y="581" font-size="12.2" fill="#374151">edits MView.ini, Default.mouse</text>
+<text x="742" y="598" font-size="12.2" fill="#374151">uIniEditor, uMousePage</text>
+<rect x="1050" y="520" width="200" height="110" rx="9" fill="#DFF1F3" stroke="#17707A" stroke-width="1.8"/>
+<text x="1062" y="544" font-size="15.5" font-weight="700" fill="#17707A">TNavigator</text>
+<text x="1062" y="564" font-size="12.2" fill="#374151">prev / next image, folder</text>
+<text x="1062" y="581" font-size="12.2" fill="#374151">scanner's lists only</text>
+<text x="1062" y="598" font-size="12.2" fill="#374151">uNavigator</text>
+<rect x="1320" y="520" width="230" height="110" rx="9" fill="#E6EEF0" stroke="#3D6670" stroke-width="1.8"/>
+<text x="1332" y="544" font-size="15.5" font-weight="700" fill="#3D6670">TImageCache</text>
+<text x="1332" y="564" font-size="12.2" fill="#374151">decoded images by name</text>
+<text x="1332" y="581" font-size="12.2" fill="#374151">LRU + keep-window</text>
+<text x="1332" y="598" font-size="12.2" fill="#374151">uImageCache</text>
+<rect x="1590" y="520" width="220" height="110" rx="9" fill="#E2F2E6" stroke="#2E7A48" stroke-width="1.8"/>
+<text x="1602" y="544" font-size="15.5" font-weight="700" fill="#2E7A48">Animation clock</text>
+<text x="1602" y="564" font-size="12.2" fill="#374151">GIF frames on a UI timer</text>
+<text x="1602" y="581" font-size="12.2" fill="#374151">TFrameClock, cursor</text>
+<text x="1602" y="598" font-size="12.2" fill="#374151">uAnimation</text>
+<rect x="1050" y="840" width="330" height="100" rx="9" fill="#DFF1F3" stroke="#17707A" stroke-width="1.8"/>
+<text x="1062" y="864" font-size="15.5" font-weight="700" fill="#17707A">TDirectoryScanner</text>
+<text x="1062" y="884" font-size="12.2" fill="#374151">resolves what to open, lists folders</text>
+<text x="1062" y="901" font-size="12.2" fill="#374151">builds TDirectoryTree + image lists</text>
+<text x="1062" y="918" font-size="12.2" fill="#374151">uDirectoryScanner (uDirectoryTree, …Images)</text>
+<rect x="1050" y="1020" width="330" height="170" rx="9" fill="#E6EEF0" stroke="#3D6670" stroke-width="1.8"/>
+<text x="1062" y="1044" font-size="15.5" font-weight="700" fill="#3D6670">TJobScheduler + TJobQueue</text>
+<text x="1062" y="1064" font-size="12.2" fill="#374151">wanted set -&gt; jobs (drop, cancel,</text>
+<text x="1062" y="1081" font-size="12.2" fill="#374151">promote, add); one worker kept free</text>
+<text x="1062" y="1098" font-size="12.2" fill="#374151">for the image on screen</text>
+<text x="1062" y="1115" font-size="12.2" fill="#374151">stuck workers replaced</text>
+<text x="1062" y="1132" font-size="12.2" fill="#374151">uJobScheduler, uJobQueue</text>
+<rect x="1470" y="1020" width="250" height="120" rx="9" fill="#E2F2E6" stroke="#2E7A48" stroke-width="1.8"/>
+<text x="1482" y="1044" font-size="15.5" font-weight="700" fill="#2E7A48">TMediaLoader</text>
+<text x="1482" y="1064" font-size="12.2" fill="#374151">file -&gt; 32-bit pixels</text>
+<text x="1482" y="1081" font-size="12.2" fill="#374151">chooses the decoder, quality level</text>
+<text x="1482" y="1098" font-size="12.2" fill="#374151">screen-size copy on the worker</text>
+<text x="1482" y="1115" font-size="12.2" fill="#374151">uMediaLoader</text>
+<rect x="1470" y="1160" width="250" height="60" rx="9" fill="#E2F2E6" stroke="#2E7A48" stroke-width="1.8"/>
+<text x="1482" y="1184" font-size="15.5" font-weight="700" fill="#2E7A48">Decoders</text>
+<text x="1482" y="1204" font-size="12.2" fill="#374151">JPEG · WIC · TIFF (+LZW helpers) · GIF</text>
+<rect x="1760" y="1020" width="150" height="120" rx="9" fill="#E2F2E6" stroke="#2E7A48" stroke-width="1.8"/>
+<text x="1772" y="1044" font-size="15.5" font-weight="700" fill="#2E7A48">TDecodedImage</text>
+<text x="1772" y="1064" font-size="12.2" fill="#374151">pixels, size,</text>
+<text x="1772" y="1081" font-size="12.2" fill="#374151">quality, frames</text>
+<text x="1772" y="1098" font-size="12.2" fill="#374151">ref-counted</text>
+<text x="1772" y="1115" font-size="12.2" fill="#374151">uDecodedImage</text>
+<rect x="580" y="900" width="300" height="96" rx="9" fill="#ECECEC" stroke="#505050" stroke-width="1.8"/>
+<text x="592" y="924" font-size="15.5" font-weight="700" fill="#505050">IOGate  (uIOGate)</text>
+<text x="592" y="944" font-size="12.2" fill="#374151">a display read goes first:</text>
+<text x="592" y="961" font-size="12.2" fill="#374151">scanner and preloads wait</text>
+<rect x="580" y="1100" width="300" height="80" rx="9" fill="#ECECEC" stroke="#505050" stroke-width="1.8"/>
+<text x="592" y="1124" font-size="15.5" font-weight="700" fill="#505050">uMemoryGuard</text>
+<text x="592" y="1144" font-size="12.2" fill="#374151">refuses images that would not fit</text>
+<rect x="1050" y="1270" width="330" height="110" rx="9" fill="#ECECEC" stroke="#505050" stroke-width="1.8"/>
+<text x="1062" y="1294" font-size="15.5" font-weight="700" fill="#505050">Save thread (TImageSaveThread)</text>
+<text x="1062" y="1314" font-size="12.2" fill="#374151">started by TMView (Save image): writes</text>
+<text x="1062" y="1331" font-size="12.2" fill="#374151">the PNG of an image, crop or paste</text>
+<text x="1062" y="1348" font-size="12.2" fill="#374151">uImageSaver</text>
+<rect x="300" y="1270" width="330" height="110" rx="9" fill="#ECECEC" stroke="#505050" stroke-width="1.8"/>
+<text x="312" y="1294" font-size="15.5" font-weight="700" fill="#505050">Watchdog thread (uWatchdog)</text>
+<text x="312" y="1314" font-size="12.2" fill="#374151">Ctrl+Alt+Shift+Q: emergency exit</text>
+<text x="312" y="1331" font-size="12.2" fill="#374151">exit deadline (4 s), armed by TMainForm</text>
+<text x="312" y="1348" font-size="12.2" fill="#374151">on close and on Esc</text>
+<rect x="1470" y="1275" width="250" height="96" rx="9" fill="#FFFFFF" stroke="#6b7280" stroke-width="1.8"/>
+<text x="1482" y="1299" font-size="15.5" font-weight="700" fill="#6b7280">Disk</text>
+<text x="1482" y="1319" font-size="12.2" fill="#374151">image files, folders</text>
+<text x="1482" y="1336" font-size="12.2" fill="#374151">MView.ini, Default.mouse, CSV logs</text>
+<path d="M185,216 L185,290" fill="none" stroke="#374151" stroke-width="1.9" marker-end="url(#a1)"/>
+<circle cx="185" cy="252" r="12" fill="#374151" stroke="#fff" stroke-width="2"/><text x="185" y="256.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">1</text>
+<rect x="199" y="241" width="69" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="203" y="256" text-anchor="start" font-size="12" font-weight="600" fill="#374151">raw input</text>
+<path d="M310,340 L390,340" fill="none" stroke="#374151" stroke-width="1.9" marker-end="url(#a1)"/>
+<circle cx="350" cy="322" r="12" fill="#374151" stroke="#fff" stroke-width="2"/><text x="350" y="326.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">2</text>
+<path d="M650,340 L730,340" fill="none" stroke="#374151" stroke-width="1.9" marker-end="url(#a1)"/>
+<circle cx="690" cy="322" r="12" fill="#374151" stroke="#fff" stroke-width="2"/><text x="690" y="326.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">3</text>
+<rect x="651" y="361" width="63" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="655" y="376" text-anchor="start" font-size="12" font-weight="600" fill="#374151">TCommand</text>
+<path d="M980,340 L1050,340" fill="none" stroke="#374151" stroke-width="1.9" marker-end="url(#a1)"/>
+<circle cx="1015" cy="322" r="12" fill="#374151" stroke="#fff" stroke-width="2"/><text x="1015" y="326.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">4</text>
+<rect x="981" y="361" width="56" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="985" y="376" text-anchor="start" font-size="12" font-weight="600" fill="#374151">Execute</text>
+<path d="M1150,410 L1150,520" fill="none" stroke="#374151" stroke-width="1.9" marker-end="url(#a1)"/>
+<circle cx="1150" cy="468" r="12" fill="#374151" stroke="#fff" stroke-width="2"/><text x="1150" y="472.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">5</text>
+<rect x="1164" y="457" width="89" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="1168" y="472" text-anchor="start" font-size="12" font-weight="600" fill="#374151">which image?</text>
+<path d="M1062,410 L1062,435 Q1062,445 1052,445 L1030,445 Q1020,445 1020,455 L1020,1050 Q1020,1060 1030,1060 L1050,1060" fill="none" stroke="#374151" stroke-width="1.9" marker-end="url(#a1)"/>
+<circle cx="1020" cy="760" r="12" fill="#374151" stroke="#fff" stroke-width="2"/><text x="1020" y="764.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">6</text>
+<rect x="1034" y="749" width="155" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="1038" y="764" text-anchor="start" font-size="12" font-weight="600" fill="#374151">Reconcile (wanted set)</text>
+<path d="M1380,1050 L1470,1050" fill="none" stroke="#374151" stroke-width="1.9" marker-end="url(#a1)"/>
+<circle cx="1425" cy="1032" r="12" fill="#374151" stroke="#fff" stroke-width="2"/><text x="1425" y="1036.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">7</text>
+<rect x="1388" y="1067" width="36" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="1392" y="1082" text-anchor="start" font-size="12" font-weight="600" fill="#374151">Load</text>
+<path d="M1595,1140 L1595,1160" fill="none" stroke="#374151" stroke-width="1.9" marker-end="url(#a1)"/>
+<path d="M1720,1080 L1760,1080" fill="none" stroke="#374151" stroke-width="1.9" marker-end="url(#a1)"/>
+<circle cx="1740" cy="1062" r="12" fill="#374151" stroke="#fff" stroke-width="2"/><text x="1740" y="1066.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">8</text>
+<path d="M1835,1020 L1835,365 Q1835,355 1825,355 L1380,355" fill="none" stroke="#2563eb" stroke-width="1.9" stroke-dasharray="7 5" marker-end="url(#a2)"/>
+<circle cx="1835" cy="760" r="12" fill="#2563eb" stroke="#fff" stroke-width="2"/><text x="1835" y="764.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">9</text>
+<rect x="1849" y="749" width="96" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="1853" y="764" text-anchor="start" font-size="12" font-weight="600" fill="#2563eb">TThread.Queue</text>
+<rect x="1396" y="364" width="116" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="1400" y="379" text-anchor="start" font-size="12" font-weight="600" fill="#2563eb">HandleImageReady</text>
+<path d="M1350,410 L1350,520" fill="none" stroke="#374151" stroke-width="1.9" marker-end="url(#a1)"/>
+<rect x="1356" y="457" width="30" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="1360" y="472" text-anchor="start" font-size="12" font-weight="600" fill="#374151">Add</text>
+<path d="M1050,398 L1040,398 Q1030,398 1030,408 L1030,460 Q1030,470 1020,470 L250,470 Q240,470 240,480 L240,520" fill="none" stroke="#374151" stroke-width="1.9" marker-end="url(#a1)"/>
+<circle cx="560" cy="470" r="12" fill="#374151" stroke="#fff" stroke-width="2"/><text x="560" y="474.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">10</text>
+<rect x="574" y="459" width="63" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="578" y="474" text-anchor="start" font-size="12" font-weight="600" fill="#374151">SetImage</text>
+<path d="M150,520 L150,390" fill="none" stroke="#374151" stroke-width="1.9" marker-end="url(#a1)"/>
+<circle cx="150" cy="455" r="12" fill="#374151" stroke="#fff" stroke-width="2"/><text x="150" y="459.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">11</text>
+<rect x="164" y="444" width="43" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="168" y="459" text-anchor="start" font-size="12" font-weight="600" fill="#374151">Paint</text>
+<path d="M1380,395 L1690,395 Q1700,395 1700,405 L1700,520" fill="none" stroke="#374151" stroke-width="1.9" marker-end="url(#a1)"/>
+<rect x="1596" y="384" width="50" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="1600" y="399" text-anchor="start" font-size="12" font-weight="600" fill="#374151">frames</text>
+<path d="M1285,410 L1285,840" fill="none" stroke="#374151" stroke-width="1.9" marker-end="url(#a1)"/>
+<rect x="1289" y="689" width="69" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="1293" y="704" text-anchor="start" font-size="12" font-weight="600" fill="#374151">OpenMedia</text>
+<path d="M1150,840 L1150,630" fill="none" stroke="#2563eb" stroke-width="1.9" stroke-dasharray="7 5" marker-end="url(#a2)"/>
+<rect x="995" y="689" width="149" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="1140" y="704" text-anchor="end" font-size="12" font-weight="600" fill="#2563eb">lists (TThread.Queue)</text>
+<path d="M1380,910 L1430,910 Q1440,910 1440,920 L1440,1290 Q1440,1300 1450,1300 L1470,1300" fill="none" stroke="#9ca3af" stroke-width="1.9" marker-end="url(#a4)"/>
+<rect x="1442" y="949" width="96" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="1446" y="964" text-anchor="start" font-size="12" font-weight="600" fill="#6b7280">reads folders</text>
+<path d="M1640,1220 L1640,1275" fill="none" stroke="#9ca3af" stroke-width="1.9" marker-end="url(#a4)"/>
+<rect x="1644" y="1237" width="83" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="1648" y="1252" text-anchor="start" font-size="12" font-weight="600" fill="#6b7280">reads files</text>
+<path d="M1050,880 L880,935" fill="none" stroke="#b45309" stroke-width="1.9" stroke-dasharray="7 5" marker-end="url(#a3)"/>
+<rect x="896" y="877" width="36" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="900" y="892" text-anchor="start" font-size="12" font-weight="600" fill="#b45309">wait</text>
+<path d="M1050,1100 L970,1100 Q960,1100 960,1090 L960,985 Q960,975 950,975 L880,975" fill="none" stroke="#b45309" stroke-width="1.9" stroke-dasharray="7 5" marker-end="url(#a3)"/>
+<rect x="896" y="989" width="96" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="900" y="1004" text-anchor="start" font-size="12" font-weight="600" fill="#b45309">raise / yield</text>
+<path d="M1050,1150 L880,1150" fill="none" stroke="#b45309" stroke-width="1.9" stroke-dasharray="7 5" marker-end="url(#a3)"/>
+<rect x="896" y="1124" width="76" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="900" y="1139" text-anchor="start" font-size="12" font-weight="600" fill="#b45309">check size</text>
+<path d="M845,390 L845,520" fill="none" stroke="#7c3aed" stroke-width="1.9" marker-end="url(#a5)"/>
+<rect x="849" y="489" width="142" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="853" y="504" text-anchor="start" font-size="12" font-weight="600" fill="#7c3aed">Esc: settings screen</text>
+<path d="M730,575 L650,575" fill="none" stroke="#9ca3af" stroke-width="1.9" marker-end="url(#a4)"/>
+<rect x="656" y="587" width="69" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="660" y="602" text-anchor="start" font-size="12" font-weight="600" fill="#6b7280">MView.ini</text>
+<path d="M1380,1335 L1470,1335" fill="none" stroke="#9ca3af" stroke-width="1.9" marker-end="url(#a4)"/>
+<rect x="1396" y="1309" width="30" height="20" rx="4" fill="#ffffff" opacity="0.92"/>
+<text x="1400" y="1324" text-anchor="start" font-size="12" font-weight="600" fill="#6b7280">PNG</text>
+<rect x="1980" y="110" width="380" height="1260" rx="12" fill="#ffffff" stroke="#e5e7eb"/>
+<text x="2000" y="146" font-size="17" font-weight="700" fill="#1f2937">One image, step by step</text>
+<circle cx="2012" cy="182" r="12" fill="#374151"/><text x="2012" y="186.5" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">1</text>
+<text x="2034" y="187" font-size="13" fill="#374151">The surface (CPU or OpenGL) gets the mouse</text>
+<text x="2034" y="205" font-size="13" fill="#374151">or key event from Windows.</text>
+<circle cx="2012" cy="234" r="12" fill="#374151"/><text x="2012" y="238.5" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">2</text>
+<text x="2034" y="239" font-size="13" fill="#374151">It passes it to its TMouseEngine.</text>
+<circle cx="2012" cy="268" r="12" fill="#374151"/><text x="2012" y="272.5" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">3</text>
+<text x="2034" y="273" font-size="13" fill="#374151">The engine looks up the zone and the event</text>
+<text x="2034" y="291" font-size="13" fill="#374151">in the profile (Default.mouse) and makes a</text>
+<text x="2034" y="309" font-size="13" fill="#374151">command, e.g. cmdNextImage. Esc and the</text>
+<text x="2034" y="327" font-size="13" fill="#374151">arrow keys are fixed.</text>
+<circle cx="2012" cy="356" r="12" fill="#374151"/><text x="2012" y="360.5" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">4</text>
+<text x="2034" y="361" font-size="13" fill="#374151">TMainForm opens the menu itself; every other</text>
+<text x="2034" y="379" font-size="13" fill="#374151">command goes to TMView.Execute.</text>
+<circle cx="2012" cy="408" r="12" fill="#374151"/><text x="2012" y="412.5" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">5</text>
+<text x="2034" y="413" font-size="13" fill="#374151">TMView asks TNavigator which image is next.</text>
+<text x="2034" y="431" font-size="13" fill="#374151">The navigator only uses the lists the</text>
+<text x="2034" y="449" font-size="13" fill="#374151">scanner made; the UI thread never reads the</text>
+<text x="2034" y="467" font-size="13" fill="#374151">disk for images or folders.</text>
+<circle cx="2012" cy="496" r="12" fill="#374151"/><text x="2012" y="500.5" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">6</text>
+<text x="2034" y="501" font-size="13" fill="#374151">TMView tells the scheduler which images it</text>
+<text x="2034" y="519" font-size="13" fill="#374151">wants now (current image first, then</text>
+<text x="2034" y="537" font-size="13" fill="#374151">neighbours to preload). The queue drops,</text>
+<text x="2034" y="555" font-size="13" fill="#374151">cancels, promotes and adds jobs to match.</text>
+<circle cx="2012" cy="584" r="12" fill="#374151"/><text x="2012" y="588.5" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">7</text>
+<text x="2034" y="589" font-size="13" fill="#374151">A worker thread takes a job and calls</text>
+<text x="2034" y="607" font-size="13" fill="#374151">TMediaLoader.Load, which picks the decoder</text>
+<text x="2034" y="625" font-size="13" fill="#374151">(JPEG, WIC, TIFF, GIF) and the quality</text>
+<text x="2034" y="643" font-size="13" fill="#374151">(preview, screen, full).</text>
+<circle cx="2012" cy="672" r="12" fill="#374151"/><text x="2012" y="676.5" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">8</text>
+<text x="2034" y="677" font-size="13" fill="#374151">The result is a TDecodedImage (pixels +</text>
+<text x="2034" y="695" font-size="13" fill="#374151">facts), made on the worker.</text>
+<circle cx="2012" cy="724" r="12" fill="#374151"/><text x="2012" y="728.5" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">9</text>
+<text x="2034" y="729" font-size="13" fill="#374151">It goes back to the UI thread with</text>
+<text x="2034" y="747" font-size="13" fill="#374151">TThread.Queue; TMView puts it in the cache.</text>
+<circle cx="2012" cy="776" r="12" fill="#374151"/><text x="2012" y="780.5" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">10</text>
+<text x="2034" y="781" font-size="13" fill="#374151">If it is the image on screen, TMView hands</text>
+<text x="2034" y="799" font-size="13" fill="#374151">it to the renderer (SetImage).</text>
+<circle cx="2012" cy="828" r="12" fill="#374151"/><text x="2012" y="832.5" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">11</text>
+<text x="2034" y="833" font-size="13" fill="#374151">The renderer paints it on the surface, with</text>
+<text x="2034" y="851" font-size="13" fill="#374151">zoom, rotation and the overlay lines.</text>
+<text x="2000" y="888" font-size="15" font-weight="700" fill="#1f2937">Arrows</text>
+<path d="M2000,912 L2050,912" stroke="#374151" stroke-width="2" marker-end="url(#a1)"/>
+<text x="2062" y="916.5" font-size="12.5" fill="#374151">call on the same thread</text>
+<path d="M2000,936 L2050,936" stroke="#2563eb" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#a2)"/>
+<text x="2062" y="940.5" font-size="12.5" fill="#374151">result handed to the UI thread (TThread.Queue)</text>
+<path d="M2000,960 L2050,960" stroke="#b45309" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#a3)"/>
+<text x="2062" y="964.5" font-size="12.5" fill="#374151">shared guard (I/O gate, memory, watchdog)</text>
+<path d="M2000,984 L2050,984" stroke="#7c3aed" stroke-width="2" marker-end="url(#a5)"/>
+<text x="2062" y="988.5" font-size="12.5" fill="#374151">switch to the settings screen</text>
+<path d="M2000,1008 L2050,1008" stroke="#9ca3af" stroke-width="2" marker-end="url(#a4)"/>
+<text x="2062" y="1012.5" font-size="12.5" fill="#374151">reads / writes a file</text>
+<text x="2000" y="1040" font-size="12.5" fill="#4b5563">Opening a file or folder (OpenMedia) goes to the</text>
+<text x="2000" y="1057" font-size="12.5" fill="#4b5563">scanner thread first; its lists come back with</text>
+<text x="2000" y="1074" font-size="12.5" fill="#4b5563">TThread.Queue and the navigator takes them. A 50</text>
+<text x="2000" y="1091" font-size="12.5" fill="#4b5563">ms timer on the form also picks up any queued</text>
+<text x="2000" y="1108" font-size="12.5" fill="#4b5563">results (delivery safety net).</text>
+</svg>

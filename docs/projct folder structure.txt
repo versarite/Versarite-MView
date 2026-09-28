@@ -1,0 +1,40 @@
+C:\
+└── Projects
+    └── MView
+        │
+        ├── build\
+        ├── docs\
+        │   ├── images\
+        │   └── reverse_engineering\
+        │
+        ├── mouse\
+        │
+        ├── resources\
+        │   ├── icons\
+        │   └── cursors\
+        │
+        ├── screenshots\
+        │
+        ├── source\
+        │   ├── main\
+        │   ├── core\
+        │   ├── navigation\
+        │   ├── rendering\
+        │   ├── imaging\
+        │   ├── mouse\
+        │   ├── scripting\
+        │   ├── cache\
+        │   ├── config\
+        │   └── utility\
+        │
+        ├── test\
+        │   ├── images\
+        │   ├── performance\
+        │   └── scripts\
+        │
+        ├── thumbs\
+        │
+        ├── .gitignore
+        ├── LICENSE
+        ├── README.md
+        └── MView.lpi

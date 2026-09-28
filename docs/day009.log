@@ -1,0 +1,306 @@
+# Day 009 – Zoom Model, Interaction and GPU Rendering Direction
+
+## Theme
+
+Today's work extended the renderer from static fit-to-screen display into interactive zoom behavior and, more importantly, clarified the likely architecture required for the fluid zooming and panning targeted by MView.
+
+The key observation was that the current CPU-side resampling approach behaves very differently from Hamana at high magnification. This led to a discussion of GPU-backed rendering and transform-based image presentation.
+
+## Zoom Model
+
+We implemented the first working zoom model.
+
+The renderer maintains:
+
+```pascal
+FViewState.Zoom: Double;
+```
+
+with:
+
+```text
+Zoom = 1.0
+```
+
+representing the current fit-to-screen scale.
+
+The display scale is calculated as:
+
+```text
+ActualScale = FitScale × Zoom
+```
+
+This allows zoom to be expressed independently of the actual fit scale.
+
+For example:
+
+```text
+Zoom = 1.00  → fit-to-screen
+Zoom = 1.20  → 20% larger than fit
+Zoom = 1.44  → another 20% increase
+```
+
+The implementation was tested successfully.
+
+## Zoom Progression
+
+We clarified that the desired zoom progression is multiplicative.
+
+The configurable parameter will eventually represent the percentage change relative to the current scale.
+
+For a 20% progression:
+
+```text
+Zoom in:
+current × 1.20
+
+Zoom out:
+current ÷ 1.20
+```
+
+This preserves the intended multiplicative progression while allowing an in/out sequence to return exactly to the previous zoom state.
+
+The configurable zoom progression should remain separate from the absolute zoom value.
+
+## Keyboard Zoom Test
+
+For the current prototype, keyboard controls were selected instead of mouse-wheel handling.
+
+The intended controls are:
+
+```text
+Right Arrow → Zoom In
+Left Arrow  → Zoom Out
+```
+
+Keyboard handling belongs in `TMediaView`, not in `TRenderer.Create`.
+
+The architecture is:
+
+```text
+Keyboard
+   ↓
+TMediaView.KeyDown
+   ↓
+TRenderer.ZoomIn / ZoomOut
+   ↓
+FViewState.Zoom changes
+   ↓
+Invalidate
+   ↓
+Paint
+```
+
+`VK_LEFT` and `VK_RIGHT` are provided by the Lazarus `LCLType` unit.
+
+## Zoom Limits
+
+No minimum or maximum zoom limits have been implemented yet.
+
+This is intentional. The limits should be determined experimentally after testing with real large images and high magnification.
+
+Potential considerations include:
+
+- source image dimensions
+- memory requirements
+- maximum useful display size
+- BGRABitmap limitations
+- rendering performance
+- practical usefulness of extreme magnification
+
+## Performance Observation
+
+Zooming progressively inward became noticeably slower than zooming outward.
+
+The current rendering path is:
+
+```text
+FBitmap
+   ↓
+CPU Resample
+   ↓
+larger FDisplayBitmap
+   ↓
+Draw
+```
+
+As zoom increases, the display bitmap becomes progressively larger. Since pixel processing depends on image area, increasing the linear scale produces a much larger number of pixels.
+
+## Critical Reversibility Test
+
+Ten zoom-in steps followed by ten zoom-out steps did not restore the original size when zoom-out was implemented as multiplication by 0.80.
+
+This exposed the mathematical problem:
+
+```text
+1.20 × 0.80 = 0.96
+```
+
+The correct inverse operation is therefore division by 1.20:
+
+```text
+ZoomIn  = Zoom × 1.20
+ZoomOut = Zoom ÷ 1.20
+```
+
+This keeps the multiplicative model while making the operations reversible.
+
+## Hamana Observation
+
+Additional information about Hamana was provided during the session.
+
+The supplied description states that Hamana uses a DirectX 9-based GPU rendering architecture in which decoded images are uploaded to GPU memory as textures and presented on polygonal geometry.
+
+The supplied description further states that scaling, interpolation, panning, zooming and rotation are handled through the graphics pipeline.
+
+These details are treated as supplied design information about Hamana, not as independently verified implementation facts.
+
+## Key Insight: Panning Reveals the Rendering Strategy
+
+A particularly important observation was made about Hamana.
+
+At very large magnification, Hamana can apparently pan an image without noticeable delay.
+
+This suggests that panning is not repeatedly generating a new bitmap. A more promising model is:
+
+```text
+Decoded image
+     ↓
+GPU texture
+     ↓
+transform
+ ┌───┼────────┐
+ │   │        │
+Zoom Pan   Rotation
+ │   │        │
+ └───┼────────┘
+     ↓
+GPU
+     ↓
+screen
+```
+
+Under this model, panning changes only the transform, such as `PanX` and `PanY`, while the image data remains unchanged.
+
+## Implication for Zoom
+
+The same reasoning applies to zoom.
+
+Instead of:
+
+```text
+Zoom
+  ↓
+resample entire source image
+  ↓
+create larger bitmap
+  ↓
+draw
+```
+
+a GPU-oriented renderer can conceptually perform:
+
+```text
+Decoded image
+     ↓
+GPU texture
+     ↓
+scale transform
+     ↓
+screen
+```
+
+The GPU performs the scaling and interpolation during presentation.
+
+This could explain the fast zoom and lack of visible stepwise rendering observed in Hamana.
+
+## FDisplayBitmap Status
+
+The current `FDisplayBitmap` implementation remains useful as a working prototype and reference for the CPU renderer.
+
+However, today's discussion suggests that it should not automatically become the foundation of the final zoom/pan architecture.
+
+Generating progressively larger full-image display bitmaps becomes problematic when:
+
+- source images are very large
+- zoom is high
+- most of the scaled image lies outside the viewport
+- the user is panning rapidly
+
+## Current Preferred Rendering Model
+
+The emerging target architecture is:
+
+```text
+                 decoded image
+                       │
+                       ▼
+                 GPU texture
+                       │
+              ┌────────┴────────┐
+              │                 │
+            Zoom              Pan
+              │                 │
+              └────────┬────────┘
+                       │
+                    Rotation
+                       │
+                       ▼
+                 GPU transform
+                       │
+                       ▼
+                    screen
+```
+
+This model is aligned with the desired behavior:
+
+- fast zoom
+- fast panning
+- high magnification
+- unrestricted movement
+- rotation without regenerating the source image
+- minimal interaction latency
+
+## Current Milestone
+
+The current implementation successfully supports:
+
+- first image display
+- fit-to-screen rendering
+- aspect-ratio preservation
+- centered display
+- cached display bitmap
+- multiplicative zoom
+- keyboard-controlled zoom
+- renderer/view separation
+- `FViewState` preparation for future pan and rotation
+
+The main architectural conclusion is that the final zoom/pan renderer should probably be transform-based rather than based on repeatedly resampling the entire image.
+
+## Next Session
+
+Before adding more zoom behavior, investigate the most practical GPU-backed rendering path for the current Lazarus/Free Pascal environment.
+
+The next technical questions are:
+
+1. What GPU-capable rendering mechanisms are available?
+2. Can the existing Lazarus/BGRABitmap setup use a GPU-backed canvas or texture path?
+3. Can an already decoded image be uploaded once and then transformed without CPU-side resampling?
+4. Can the renderer support zoom, PanX/PanY, rotation and clipping?
+5. What is the performance of large images at high magnification?
+
+A useful first experiment is to prove fast panning before implementing the complete zoom system.
+
+## Key Insight
+
+> Fast panning is probably the key to solving fast zoom.
+
+If the image is treated as a persistent GPU texture and the renderer changes only its transform, then:
+
+```text
+Pan = change position
+Zoom = change scale
+Rotation = change orientation
+```
+
+rather than regenerating the bitmap for every interaction.

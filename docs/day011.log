@@ -1,0 +1,100 @@
+# Day 011 – Phase B: Threading Core
+
+## Theme
+
+Phase B moves the slow work off the UI thread: decoding goes to a worker thread, directory scanning to a scanner thread. The window stays responsive whatever the files are like, and MView can exit at any moment.
+
+Written without a compiler at hand, like Phase A, so the first step is again a build on the Windows PC.
+
+## Threads
+
+```text
+UI thread       window, input, navigation, cache, painting
+decode worker   reads and decodes files, makes a screen-size copy
+scanner         builds the directory tree
+```
+
+Workers never touch the GUI, the navigator or the renderer. They hand results to the UI thread with `TThread.Queue`, never `Synchronize`, so a worker never waits for the UI (spec §2.4, §5.7).
+
+## Decoding
+
+`TJobScheduler` owns a `TJobQueue` and one `TDecodeWorker` (spec §5.1 allows one worker in the early phases; more workers change nothing in the design).
+
+When the user moves to an image:
+
+```text
+in the cache?  -> shown at once
+otherwise      -> a decode job is queued; the previous image stays on
+                  screen and the info line says "loading ..."
+```
+
+Every new request cancels all jobs for other files. A job already running for the wanted file is kept, not restarted (spec §5.4). Holding a key down therefore never builds up a backlog: only the file the user is looking at is ever decoded.
+
+Cancellation is cooperative. The loader answers the FPC image readers' progress event with "stop" when the job is cancelled. Readers that don't report progress run to the end, and their result is thrown away.
+
+### Job lifetime
+
+Jobs are created and freed on the UI thread only. A waiting job that gets cancelled is freed at once; a running one is only flagged, finished by the worker, and freed by the UI thread after delivery. So a worker never frees a job, and no job is freed while a worker uses it.
+
+## Screen-size copy
+
+For images larger than the screen, the worker also makes a copy scaled to screen size (spec §7.1, "Screen" level). The renderer draws from that copy whenever the image is shown no larger than it, which is the normal fit view. Fitting a 100-megapixel TIFF now costs the UI thread about one screen of work instead of scaling the whole image.
+
+Zooming in past the copy's size, and rotating, still use the full image on the UI thread. The GPU renderer of Phase D makes those free.
+
+## Image cache
+
+`TImageCache` keeps decoded images within `CacheSizeMB`. Entries are found by file key (name, size, time), so a file replaced on disk is decoded again. The current image is never evicted. Phase B evicts the least recently used image first; Phase C switches to "distance from the current image" (spec §13).
+
+## Directory scanner
+
+`OpenMedia` now lists only the start folder (fast) and shows its image at once; the whole tree is scanned on the scanner thread (spec §11). The newest request wins: an obsolete scan stops early, and a tree from an older request is thrown away (generation numbers).
+
+Until the tree arrives, browsing works inside the start folder and the info line says "scanning folders ...". A start folder without images shows "Looking for images ..." until the tree tells where the first image is.
+
+## Shutdown
+
+In the order of spec §5.8: stop accepting work, cancel all jobs, stop the threads and wait for them, remove their pending deliveries, free the rest. While waiting, deliveries that are already queued only free their jobs.
+
+The window hides the moment Exit is chosen, so leaving feels immediate even if a decode that can't be interrupted is still finishing.
+
+## Testing Aid
+
+`[Debug] DecodeDelayMs` in `MView.ini` makes every decode wait that long first (in small cancellable steps). With a value like 2000, the small test images behave like huge TIFFs, which makes the Phase B behaviour easy to see:
+
+- the window stays responsive while "loading ..." is shown;
+- pressing → several times quickly decodes only the last image;
+- Esc during a decode exits at once.
+
+Set it back to 0 afterwards.
+
+## Tests
+
+`TestNavigation` has 66 checks now. New: a cancelled scan reports it; a navigator started before the tree is known shows an opened file at once, browses inside its folder, doesn't wrap while the tree is missing, and moves on to the first folder with images once the tree arrives.
+
+## Next
+
+Phase C: preloading. The scheduler learns the "wanted set" (current image first, then the next images in the direction of travel), more workers with one always kept free for the current image, and the I/O gate.
+
+## Measuring (spec §12)
+
+Added after the Phase B commit.
+
+**Diagnostics line.** Press `D`, or set `[Debug] ShowFPS=1`. A second bar above the info line shows, for the current image:
+
+- `from cache`, or `decode N ms` (the time the worker spent reading the file);
+- `screen copy N ms` (the worker's scaled-down copy, only for images larger than the screen);
+- the image size and the cache fill (images / MB);
+- `latency N ms`: from the key press (or opening) to the end of the first paint of the new image. This is what the user feels;
+- `paint N ms`: drawing the image in the last paint (zoom, pan and resize show here);
+- `(+N ms simulated delay)` when DecodeDelayMs is set.
+
+The D setting is saved on exit.
+
+**Timing log.** `[Debug] TimingLog=1` writes one line per displayed image to `timing.csv` next to MView.exe (so `build\timing.csv`). The first line `sep=;` makes Excel split the columns whatever the regional settings. Columns:
+`time;file;width;height;file_kb;decode_ms;screen_copy_ms;latency_ms;paint_ms;source;result;simulated_delay_ms`.
+Delete the file to start a fresh series. A locked file (open in Excel) is silently skipped.
+
+Clock: new unit `source\utility\uStopwatch.pas` (QueryPerformanceCounter, sub-microsecond).
+
+Useful series: the same folder with DecodeDelayMs=0, once cold (first pass) and once warm (back through it: `source=cache`). For Phase C the target is that most rows during normal browsing say `cache`.

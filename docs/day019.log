@@ -1,0 +1,271 @@
+# Day 19 — Failsafe against lockups
+
+## Report
+
+On another computer (an image workstation) MView froze on a corrupt JPEG so badly that the process could not be ended.
+
+A process that even Task Manager can't end usually has a thread stuck inside Windows (a disk / network read, a driver), or the computer is paging itself to death because one program asked for far more memory than it has. The second fits a corrupt JPEG: its header can claim up to 65535 x 65535 pixels, 17 GB as BGRA. (The file itself would help to find out exactly; please copy it to test\images\corrupt if possible.)
+
+## Changes
+
+**Emergency exit: Ctrl+Alt+Shift+Q** (new unit `source\utility\uWatchdog.pas`). A small thread of its own registers the key system-wide and ends the process at once (TerminateProcess) when it is pressed, whatever the window and the worker threads are doing. Shown in the context menu next to Exit.
+
+**Exit deadline.** Every way of closing (Esc, gesture, menu, window button, settings editor) arms a 4 s deadline in the watchdog. A shutdown that waits longer, e.g. for a worker stuck in a decode, ends with the process being terminated instead of a process without a window left running. Settings are now saved before the threads are stopped, so they survive that.
+
+**Size guard** (new unit `source\utility\uMemoryGuard.pas`). Before a bitmap is allocated, the loader checks that it fits: at most half of the physical memory for one image, never more than 2 gigapixels. Otherwise the image gets an error placeholder ("image too large for this computer: W x H would need N MB (limit M MB)") instead of the allocation. Applied to: JPEG (from the header, for the size actually decoded: 1/2..1/8 for the quick view, full size plus screen copy), EXIF thumbnails (more than 4 MP is not a thumbnail), TIFF through WIC (after WIC reports the size). Not yet: other formats read by BGRABitmap (PNG, BMP, GIF, TIFF fallback), which report their size only while decoding.
+
+## What the failsafe can't do
+
+If a thread is stuck in a driver or a read that Windows itself can't interrupt, no program can end the process until that read returns; neither the hotkey nor Task Manager. The size guard removes the most likely cause of that with corrupt files.
+
+## To check
+
+- Ctrl+Alt+Shift+Q while MView runs: it disappears at once.
+- If another program already uses that key, the hotkey isn't available (TWatchdog.HotkeyRegistered is False); Esc and the deadline still work.
+- A corrupt JPEG: error placeholder, browsing continues.
+
+## The disk as the cause (user: "the most critical is likely the read from a corrupt or blocked disk")
+
+A thread waiting in a read that Windows can't interrupt (bad sector being retried, hung USB or network drive) keeps the whole process alive until the read returns; no program can end it, Task Manager included. What MView can do: never let the window wait for the disk, notice a read that doesn't come back, go on without it. Three steps, all done:
+
+**1. The window thread never reads folders** (spec §10, a shortcut taken in Phase B is gone):
+- `TDirectoryTree.Build(..., ACollectImages)` lists every folder's images while it reads the folder anyway (the scanner already visited every folder).
+- `TDirectoryScanner` does the whole opening: resolves the path (file or folder, root, start file), lists the start folder and delivers that first (`TScanStart`, `OnStartReady`), then the tree with all lists (`OnTreeReady`).
+- `TNavigator.ReadsDisk := False` in the viewer: lists only from the scanner (`OpenListed`, the tree); a folder not known is simply not entered. The tests keep the old mode (ReadsDisk = True).
+- `TMView.OpenMedia` only asks the scanner; "Opening ..." until it answers, "Not found" from the scanner. No FileExists / DirectoryExists on the window thread any more (drag and drop, start, last session).
+
+**2. No file access per step:** the cache is asked by file name (`GetByName`) instead of by a key read from the disk (`MakeImageKey` did a FindFirst on every step). Opening and F5 clear the cache, since new lists may name other versions of the files. `TNavigator.ListedKey` gives size and date from the lists where a key is needed.
+
+**3. Reads that don't come back:**
+- Decode workers: every decoder calls its cancel check regularly (per band / 16-32 rows / file part); that call now also records "alive" (`TDecodeJob.WorkerCancelCheck`). A job not alive for 20 s is taken as stuck (`TJobScheduler.CheckStuck`, checked twice a second): the file gets the placeholder "Disk not responding (no answer for 20 s)", the job is cancelled, Windows is asked to cancel the read (`CancelSynchronousIo`, where the driver allows), the I/O gate is opened, and a replacement worker starts (at most 4 per session). If the stuck worker comes back later, it leaves if it was replaced, or simply goes on working; its image replaces the placeholder.
+- Scanner: when it hasn't come back for 20 s the info line says "reading folders: the disk is not responding"; opening something else then starts a new scanner (at most 4).
+- Exit: stuck threads are not waited for and what they may still use is not freed; the watchdog deadline ends the process (which Windows completes once the read returns; the window is gone at once).
+
+Independent review found (and fixed): a worker pool that could shrink to nothing after repeated stalls; an unsigned-tick underflow that could mark a healthy worker stuck; a tree that could be delivered before its start and lost; shutdown double-free and use-after-free cases around stuck threads; the testing delay (DecodeDelayMs) counting as stuck; a leaked exception object (now EImageTooLarge); hotkey registration on systems without MOD_NOREPEAT.
+
+## Tests
+
+TestNavigation: 87 checks (12 new, TestNoDiskMode: a tree with every folder's images, a navigator without disk access starting from the scanner's start list, crossing folders from the tree's lists, ListedKey, previous directory).
+
+## To check
+
+- build_test.bat: 87 + 40 passed (confirmed 2026-09-27 00:48).
+- Normal use must feel the same: start, drag and drop, F5, folder gestures, "Not found" for a missing path.
+- If a test disk is available: unplug a USB stick while browsing it (or browse a network share and pull the cable): the window stays usable, after 20 s "Disk not responding" for that image, other folders still work, Esc closes the window at once.
+- Settings editor "View images" with a last session on a missing drive: "Not found", no freeze.
+
+## Empty and damaged files (user question: "how does mview deal with 0 byte images?")
+
+Before: safe but roundabout. A 0-byte .jpg is listed (by extension), has no preview, isn't recognised as JPEG and goes to BGRABitmap, which fails: error placeholder with BGRABitmap's message, browsing goes on (or the file is skipped with PlaceholderForBadImages=0). No hang, no allocation.
+
+Now:
+- **Empty file:** recognised at once in TMediaLoader.Load (size 0 from the key): "Empty file (0 bytes)", for every quality level, so it isn't asked for again.
+- **Implausible JPEG size:** a header that claims more than 1000 pixels per byte of file ("Damaged file: the header claims W x H pixels, but the file has only N KB"). Even a black JPEG needs about a byte per 160 pixels, and a real 108 MP photo is about 10 MB against the 108 KB this would require. This closes a gap left by the memory guard: a claimed 65535 x 65535 fails the guard at full size (17 GB), but its 1/8 quick view (268 MB) would still have been decoded, as grey.
+
+Test files in `test\images\broken` (see README.txt there): empty.jpg / .tif / .png, garbage.jpg (random bytes), header_only.jpg, truncated.jpg, jpeg_named.png (a JPEG with a .png name), huge_claim.jpg (main frame header patched to 65535 x 65535; its EXIF thumbnail is intact). Browsing through that folder must show placeholders (and a thumbnail for huge_claim.jpg, then the error) and never stall.
+
+## Wheel press toggles fullscreen
+
+Pressing the mouse wheel (middle button) switches fullscreen on / off, like Enter (uInputHandler, on the press; movement plays no part).
+
+## LZW TIFF: own decoder
+
+WIC needed 4.4-4.7 s for the quick view of a 108 MP LZW TIFF (9.2 s with two at once); Hamana a little under 3 s. The bands were already whole strips (1024 rows), so WIC wasn't re-decoding strips: it is simply slow for these files.
+
+New in uTiffQuick: `LzwDecodeStrip` and `LoadLzwTiff` for LZW strip TIFFs (8-bit, chunky, RGB / RGBA / grey, predictor 1 or 2), quick view and full size:
+- LZW decoding by position: each table entry is (position, length) of a string already in the output, so decoding is short copies inside the output buffer. One strip at a time (37 MB for these files; strips over 256 MB are left to WIC).
+- Predictor 2 is undone per row, and only for rows that are used; the quick view uses 2 of every S rows (like the uncompressed reader) and averages all columns.
+- Full size goes straight into the bitmap; memory guard as before.
+- A damaged strip leaves the rest black; unreadable strip data or other layouts go to WIC.
+
+Verified before porting: a Python copy of the exact algorithm decodes all 9 strips of IMG_20241126_201018.tif bit-identical to Pillow (predictor included). The Pascal port was checked against it by an independent review (one compile error found and fixed: a nested routine used an outer variable as loop counter).
+
+Loader order for TIFF: uncompressed quick view (row skipping) -> LZW reader -> WIC -> FPReadTiff.
+
+To check: the compressed folder, D line / timing.csv decode ms for `screen` and `full` (was 4400-4700 ms for the quick view).
+
+## Window place remembered
+
+`[Window] Left / Top / Width / Height` in MView.ini (the fields were in TConfig but never read or written). The main window reopens where it was, for the settings editor and the viewer's normal (not fullscreen) window, if that place is still on a monitor (one may have been unplugged). Fullscreen keeps it as the place to return to.
+Saved (only these four keys, TConfig.SaveWindowBounds, so nothing else in the file changes):
+- viewer: one second after the last move / resize, and on close;
+- settings editor: on close and when "View images" starts the viewer. Not on every resize: the editor holds MView.ini as text, and its next Save would write the old values back (or a write to the file would clash with unsaved edits).
+Not while maximised or minimised. Balloon help for the four keys.
+
+## Skim came too rarely (TIFF folder)
+
+The rule was a run of uninterrupted fast steps (each within 1/SkimRate s of the one before) lasting SkimEnterMs. Spinning a wheel has short pauses (moving the finger), and while large quick views are put on screen the window takes wheel events in bursts; either reset the run. Now: Skim while the steps of the last SkimEnterMs average SkimRate per second or more (a ring of the last 64 step times). Defaults unchanged (4 per second, 1500 ms: 6 steps within 1.5 s); it still ends after SkimExitMs (250 ms) without a step, and the next fast step takes it up again at once.
+
+## Balloon help: value lists
+
+SortMode and WrapScope list their possible values one per line, with their meaning and the default (the values can't be guessed). The editor's help bar is taller for that.
+
+## LZW measured, then faster
+
+First build of the own decoder (timing.csv 01:30): LZW quick view 3.76-3.87 s for the displayed image (the 7.8 s rows are preloads: their time includes waiting at the gate while the displayed image decoded). Uncompressed: 320-360 ms. The user: "compared to hamana the loading is really fast, factor 2-3 at least".
+The same algorithm in C on this file: 1.5 s unoptimised, 0.75 s at -O2. So:
+- `{$OPTIMIZATION ON}` (-O2) in uTiffQuick, whatever the project's level.
+- Display jobs decode the strips in parallel: up to 3 helper threads (TLzwStripThread; cores - 1), each taking every n-th strip with its own file handle and buffers. Each writes only its own rows: full size straight into the bitmap (row pointers taken beforehand on one thread); quick view the used rows (2 per output row) into a buffer, which the calling worker then averages. Preloads stay single-threaded and keep giving way at the I/O gate. Cancel: the worker checks between its strips and sets an abort flag the helpers watch.
+Expected: about 1 s for the LZW quick view of a 108 MP TIFF on 4 cores. To check: timing.csv decode_ms of the `compressed` folder.
+
+## GIF animation
+
+User: "please look at gif implementation now" (optimisation of the TIFF loaders left for phase G).
+
+Design (spec §5.1, §8.7):
+- **Own GIF decoder** (new unit `source\imaging\uGifDecoder.pas`) instead of BGRABitmap's reader: cancellable, memory-guarded, and a damaged or cut-off file shows / plays what it contains. Frames are kept as 8-bit palette indices plus a palette per frame, a quarter of BGRA (Test.gif: 126 frames of 800 x 704 = 70 MB instead of 284 MB). LZW by position (as for LZW TIFF), `{$OPTIMIZATION ON}`.
+- **Quality levels:** Screen = the first frame only, read from the start of the file (8 MB, the whole file only if the first frame needs more). It is qlScreen if more frames follow, qlFull for a still GIF. Full = every frame (`TAnimation` on the IDecodedImage, Bitmap = the first frame), asked for after the usual RefineDelayMs pause (250 ms). So browsing and preloads never decode whole animations. Files named .gif that aren't GIFs go to BGRABitmap.
+- **Playback** (new unit `source\imaging\uAnimation.pas`, TMView): a UI-thread timer; `TFrameClock` says which frame is due (fixed times from the start, so a late frame doesn't slow the animation; skipped frames are counted; after a stall of more than 1 s it goes on from now); the animation's cursor builds the frame (a GIF frame usually changes only a rectangle; disposal 1/2/3, transparency) and it goes to the renderer as a new version of the same image, so zoom, pan and rotation stay. While the GPU is still uploading the previous frame (`TRenderer.IsUploading`), no frame is built: the clock skips instead of queueing. The clock knows nothing about GIF (frame delays through a function), so movies without sound can use it later (rule M6).
+- Loops forever (loop counts in the file are ignored); no playback while skimming (starts when Skim ends); stops when another file is shown. Delay 0 or 1 plays at 100 ms (as browsers do). Transparent pixels show black.
+- Info line: "animated, N frames". D line: "frame i / N, k skipped", and a note if the memory limit (a quarter of RAM, at most 2 GB) left frames out.
+
+Verified before porting: a Python copy of the algorithm (`test\images\gif\gifproto.py`) is identical to Pillow frame by frame on Test.gif, three other real GIFs and synthetic ones (disposal 2 and 3, transparency, interlaced, local palettes, frames outside the logical screen, ffmpeg output, cut off). The Pascal port was compared against it line by line by an independent review, which also re-ran it (ported to Python) on all test files: identical; cut at every length and 400 random corruptions: no out-of-bounds access. It found no compile errors; fixed from it: a memory-limit test that could not fail as written, an animation that kept playing (and holding its frames) after stepping to a file not yet decoded, a zero-length copy on a cut-off sub-block, and the memory guard now counts everything held while the first frame is made.
+
+## Tests
+
+New `test\TestGif.lpr` (built with lazbuild from `TestGif.lpi`, because it needs BGRABitmap; build_test.bat does it, set LAZBUILD there if Lazarus isn't in C:\lazarus): every file in `test\images\gif` plus Test.gif against `expected.txt` (size, frames, delays, a checksum of every frame), the first frame alone, the start of a file only, a PNG named .gif, cut at every length, 300 random corruptions, frames claiming 65535 x 65535, cancel, memory limit, and the frame clock. See `test\images\gif\README.txt`.
+
+## To check
+
+- build_test.bat: TestGif all passed (and 87 + 40 as before).
+- Test.gif: first frame at once, playback after about a quarter second, smooth; zoom / pan / rotate while it plays; D line frame counter, "0 skipped" normally.
+- Browse fast through a folder of GIFs: only first frames; stopping on one starts it.
+- Minimised window: playback waits (no uploads), goes on when restored.
+
+## GIF test suite and NASA images (user: "please check the test folder")
+
+TestGif: 156 passed (user's run 02:14). The test folder now also has a GIF test suite (test\images\gif: animated_*.gif, static_*.gif, reference frames in gif\frames) and three NASA Blue Marble images of 21600 x 21600 (467 megapixels) in test\images\super images.
+
+GIF test suite: every frame of every file matches its reference picture, after two changes:
+- **The picture is the logical screen size;** frames are clipped to it (animated_transparent_loop_frames_out_of_bounds expects 100 x 100, not enlarged to the frame at x = 200 as Pillow does). Only a logical screen of 0 x 0 takes the first frame's size. frame_outside_canvas.gif is now 200 x 150 (expected.txt updated).
+- **Loop counts are honoured** (NETSCAPE2.0 / ANIMEXTS1.0): 0 = forever, n = n repeats after the first play; without the extension (animated_noloop) the animation plays once and stays on its last frame. TFrameClock takes a play count and reports Finished; the D line says "done". Showing the file again plays it again.
+- A frame claiming more than the memory guard allows, or more than 4 times the picture (at least 16 MP), is damage: the file ends there (the first frame: error).
+TestGif compares every suite frame with its PNG (transparent pixels by transparency only) and checks the loop counts; clock tests for 1 and 2 plays.
+
+NASA images (timing.csv 02:14-02:16):
+- **JPG:** quick view 3.3 s (own decoder at 1/8), fine.
+- **PNGs: error after about 21 s.** PNG went to BGRABitmap: always the full 467 MP (1.9 GB) with no size check first and no cancel; it reports no progress while decoding, so most likely the stuck-read watchdog took it for a hung disk after 20 s (the error text wasn't recorded). Now PNG and BMP are read like TIFF: **WIC in bands** (about 8 MB per call), cancellable and "alive" between bands, the quick view averaged down while reading (only a screen-size bitmap), Full after the memory guard. BGRABitmap remains the fallback when WIC can't read a file, now with the **memory guard before loading** (size from the PNG / BMP / GIF header), which closes the gap noted at the start of today.
+
+To check: the NASA PNGs (quick view expected a few seconds, the D line shows decode ms; Full after the pause, if the computer has the memory: 1.9 GB), Test.gif and the suite (animated_noloop stops on its last frame, the others loop), build_test.bat.
+
+## Phase F: the mouse language (user: "lets start now", "avoid all keyboard interactions")
+
+Decisions (user, 2026-09-27): the zones as proposed; keys only Space, Esc, Enter, D (programmable) plus the arrow keys for next / previous image and folder; save folder = the user's Documents folder; clipboard paste; start-up time into a log.
+
+**Profile** (new `source\mouse\uMouseProfile.pas`, file `Default.mouse` next to MView.ini, written with the built-in profile at the first start):
+- Four zones (the quarters), each with a name shown on screen, an optional browsing order (Date / Name) and its own event table; `[Anywhere]` for what a zone doesn't set; `[Keys]` for Space / Esc / Enter / D.
+- Events: left / right click and double-click, wheel up / down / click, tilt left / right, X1, X2, gestures left / right / up / down. Up to three commands per event ("WheelDown = SortByName, NextImage"); "None" switches an Anywhere entry off in a zone. Command names instead of Hamana's numbers; unknown lines are reported (line number) and skipped.
+- Default: top left "Edit" (wheel turns 5 degrees, double-click = edit mode), top right "Browse by name", bottom left "Browse by date", bottom right "Inspect" (wheel zooms at the mouse). Anywhere: wheel = next / previous image, double-click = fit <-> 100 %, right click = menu, wheel click = fullscreen, tilt and gestures left / right = previous / next folder, gesture up = parent folder, gesture down = exit, X1 / X2 = zoom / rotate mode (as before).
+
+**Engine** (new `source\mouse\uMouseEngine.pas`, replaces the fixed controls of uInputHandler, which is no longer used):
+- Zones with a dead band of 3 % along the middle lines (the zone doesn't flicker there); fixed while a button is held.
+- A zone's name appears in its corner for 1.5 s when the mouse enters it and with each command from it; a gesture shows what it will do in the middle of the window while it is made (back to the start = nothing).
+- A single click runs at once, unless that zone also has a double-click for the button: then it waits for the Windows double-click time.
+- Tilt: one event per tilt (holding repeats are ignored for 300 ms). X1 / X2 on the press (as before), Browser Back / Forward keys count as X1 / X2 except as an echo.
+- Navigation from a zone with an order switches to that order first (only if different; the current image stays).
+- Fixed: left drag = pan, right drag = gesture, arrow keys, Ctrl+V = paste. The other old keys (+, -, Home, End, L, R, S, F5, I, Z) are gone.
+- Menu: now a command (right click by default), no longer the LCL's automatic one; entries: Paste image, Save image, Save image and view (debugging), Exit.
+- The cursor hides after [Mouse] MouseCursorHideTime without input.
+
+**Settings editor, "Mouse & keys" page** (new `source\config\uMousePage.pas`): the zones as a picture (click a zone, Anywhere or Keys), name and order of a zone, per event up to three commands from lists ("(as in Anywhere: ...)" / "(nothing here)" for zones); "Try it here": a small area with the same zones and a real engine with the profile being edited: every button, wheel, tilt, side button and key shows what arrived and what it would run. Save / Undo / Exit / View images cover both pages.
+
+**Paste and save:** "Paste image" (menu, Ctrl+V) shows the clipboard's image ("Clipboard image ... not saved"), until the next step. "Save image" writes only the image (PNG) to [Debug] SaveImageDirectory; if that is empty, the user's Documents folder (SHGetFolderPath, also when moved to OneDrive), which is then written into MView.ini. The old save (image and a picture of the window) stays as "Save image and view (debugging)".
+
+**Start-up:** `startup.csv` next to MView.exe (with TimingLog=1): exe size, ms from process start to the window, OpenGL set-up, view ready, first image painted.
+
+**Diagnostics line** in two lines (it ran past the right edge on a full-HD screen).
+
+Tests: new `test\TestMouse.lpr` (plain fpc, in build_test.bat): profile parsing, errors with line numbers, save / load round trip, zones and dead band, the engine with a fake clock (zone order, wheel parts, zoom / turn smoothness, click vs double-click timing, drag, menu, gestures and preview, tilt repeat, X1 mode and Browser Back echo, Esc, keys, focus lost).
+
+Not compiled here (no Free Pascal in the sandbox); reviewed independently before committing.
+
+Review (two independent reviews, engine / integration) found and fixed: a test constant named TRY (a reserved word); PtInRect needing the Types unit; a double-click could span two zones; a right click moved about 22 px diagonally gave neither menu nor gesture (the two thresholds now agree); tilting the other way within 300 ms was ignored; ";" or "#" inside a zone name was cut as a comment; a UTF-8 byte order mark broke the first line; a click waiting for its double-click could run with a newly set profile; the cursor could hide while the menu was open; a paste made with no file open had no info line; a second paste could show the first one's "saved as"; Save / Undo on the mouse page focused the hidden text editor; no false "changed" from programmatic updates of the order and name. Predicted: every TestMouse check passes.
+
+Note: this MView.ini has SaveImageDirectory=...\test\saved_images\ (the old default, written by earlier versions), so saves still go there; delete the value to use the Documents folder.
+
+After the first test (user): the zone names now only appear while the diagnostics line is on (D); otherwise distracting ("they show all right and long enough to see"). "Mouse & keys" page: the three boxes of a row got headings (Command / then / and then) and the explanation says that one press runs a row's commands from left to right; the zone cells show caption, name and order on separate lines, cut at the cell's edges instead of running over.
+
+Arrow keys changed (user): up / down = previous / next image, left / right = previous / next folder (like the wheel and the gestures / tilt). TestMouse checks each arrow on its own.
+
+## Edit mode: select and crop (user)
+
+"single left click in the edit field enables edit mode, double left click disables it; edit mode enables a selection box and in the right-click menu 'crop selection'; the cropped selection is zoomed to screen and can be saved with Save image."
+- Profile: new commands EditModeOn, EditModeOff, CropSelection (EditMode = on / off stays). Built-in Edit zone (top left): LeftClick = EditModeOn, LeftDouble = EditModeOff (the click waits for the double-click time there, as designed). An existing Default.mouse keeps its old entries: the "Mouse & keys" page has a new button "Use the built-in profile" (then Save).
+- Edit mode: the mode label says "EDIT ... left drag = select an area, right click: Crop selection, double-click in the Edit zone / Esc = end". Left drag draws the selection instead of panning (the engine now also reports where a drag starts and is: cmdDragStart / cmdDragPoint). The selection is kept in original image pixels, so it stays on the image while zooming (and is drawn turned with the image); both renderers draw it as a dark / light frame. A new image clears it; the full version of the same image keeps it. Switching edit mode on starts the full-size decode.
+- Menu: "Crop selection" (only shown in edit mode, enabled with a selection). The area is cut from the best version in memory (the full image; the quick view if the full one isn't there yet, the info line says so; the frame on screen of a playing animation), shown fitted to the screen with the same rotation, as "Cropped from <name>". Save image writes <name>_crop_<time>.png. A crop can be cropped again; the next step goes back to the files.
+- Esc (Back): the zoom / rotate mode first, then edit mode, then exit (the engine sends Back to TMView, which knows about edit mode).
+Tests: TestMouse: Edit zone click = on (after the double-click time), double-click = off; drag start / point reported; Esc = Back.
+
+## Zones switch, overlay options (user, end of the day)
+
+- **Zones on / off:** [Mouse] ZonesEnabled=1 (default) / 0 in MView.ini. Off: every button does its Anywhere command everywhere; no zone orders, no zone names. The "Mouse & keys" page has a green / red button at the top left ("Zones ON" / "Zones OFF: only Anywhere counts"); it writes the line into the MView.ini text of the editor (saved with Save, like any other change); the zone picture says "(zones off)", and "Try it here" follows the switch. TestMouse: zones off, the bottom right wheel steps images instead of zooming.
+- **Overlay readability** ([View] in MView.ini):
+  - OverlaySolid=0 (default) / 1: the info and diagnostics lines on a solid black bar across the window instead of straight over the image.
+  - OverlayColor=White (default) / Yellow / Red: colour of the texts over the image (info, diagnostics, mode label, zone name, gesture text); both renderers (GPU: the white text texture tinted, so no extra cost).
+- A renderer made when switching to fullscreen now also takes over edit mode (it lost the EDIT label before).
+
+## Esc: back to the settings screen (user, after the test)
+
+"if esc is in image view mode, hitting esc does not exit, it opens the main screen with ini editor (as if started without image). in edit mode esc leaves edit mode, in the main editor esc exits the program."
+- Esc is now a fixed key (no longer in the profile's [Keys]; an old "Esc = Back" line in Default.mouse is ignored, the "Mouse & keys" page no longer shows an Esc row). In the viewer: zoom / rotate mode off, else edit mode off, else back to the settings screen.
+- Back to the settings screen: the viewer ends as on exit (fullscreen off, window place and settings saved, threads stopped), the views and the menu are freed, the settings editor shows with MView.ini and Default.mouse read again. "View images" or a dropped file starts a fresh viewer. The switch runs after the key handler (QueueAsyncCall), because the view that handles the key is freed.
+- On the settings screen Esc = Exit (with unsaved changes, the first press warns, a second one leaves). Not while "Try it here" has the focus (it tries Esc out) or a drop-down list is open.
+- The Back command from a gesture or button (if the profile maps one) does the same as Esc; Exit stays Exit.
+Tests: TestMouse: Esc not in the saved profile, old Esc line ignored, second Esc = Back (not Exit).
+Review (independent) found and fixed: a held Esc (key repeat) or a quick second Esc could reach the settings screen and end MView at once (the Esc that left the viewer is now ignored until released); the viewer's shutdown could wait forever for a worker stuck in a read (the exit deadline of the watchdog now covers it and is disarmed afterwards; uWatchdog.DisarmExitDeadline); a second viewer wrote a misleading startup.csv row (skipped); "Try it here" now answers Esc with what Back does.
+
+First test (user): Esc to the settings screen crashed (access violation in uMouseEngine FocusLost): freeing a view moves the focus away inside its inherited destructor, and its DoExit used the mouse engine it had just freed. Fixed in both views (uMediaView, uGLMediaView): DoExit checks the engine is still there.
+
+## Where the day ends
+
+Built today (Day 19, 2026-09-27): failsafe against lockups (emergency exit, exit deadline, memory guard, stuck-disk handling, no disk access on the window thread); own LZW TIFF reader (parallel, 2-3 x faster than Hamana by the user's comparison); GIF animation (own decoder, frame clock, test suite passes); PNG / BMP through WIC in bands (NASA 21600 x 21600 images open, Hamana skips them); Phase F: the mouse language (zones, profile file, settings page with "Try it here"), edit mode with selection and crop, paste from the clipboard, save image, start-up log; spec v1.3.
+Tests (user's run 16:11): 87 + 40 + 58 + 198 passed, 0 failed (before the edit mode and zones switch checks were added).
+
+## To test (for the user)
+
+1. Build (reload the changed units first), run build_test.bat: all passed, TestMouse with the new checks.
+2. Settings editor, "Mouse & keys": "Use the built-in profile", Save (gets the Edit zone click / double-click). Zones button: green / red, Save, the ini shows ZonesEnabled.
+3. Viewer: the zones as agreed; D shows the zone names; gestures show their preview; arrow keys up / down = images, left / right = folders.
+4. Edit mode: click in the top left, the EDIT label; drag a frame, zoom with the wheel (the frame stays on the image); right click, Crop selection; Save image; Esc ends edit mode, a second Esc goes to the settings screen, Esc there exits.
+5. Paste an image (Ctrl+V or the menu), Save image; empty [Debug] SaveImageDirectory to get the Documents folder.
+6. [View] OverlaySolid=1 and OverlayColor=Yellow / Red: readability of the info and diagnostics lines.
+7. Esc from the viewer: settings screen; View images again; Esc on the settings screen exits.
+8. startup.csv after a few starts (TimingLog=1): where the second goes.
+
+## Day 19, night: microscopy TIFFs, documentation
+
+Microscopy TIFF archive in test\images\microscopy tif (user): about 1,520 TIFFs, 1 GB, 43 folders. A sample of 34 files: all 8-bit, one page, strips. Leica TCS NT confocal files (1 channel with a colour table, _ch00 / _ch01 / _ch02, 512 or 1024 square, full instrument settings in ImageDescription incl. objective, zoom and pixel size in um), RGB snapshots (uncompressed / LZW), e-beam scans (inverted grey, PackBits), three Photoshop CMYK files (up to 100 MB). Microscope line, scale bar, channel merge and measuring: parked until the newer microscopes' files are in (user).
+
+Documentation (user: "update the unit files with the documentation: purpose, owns, responsibility, does not ... so that the structure is transparent; an image with the dependencies and unit interactions"):
+- Every unit header now has the same sections: Purpose, Owns, Knows, Responsibilities, Does NOT, Threads, Uses (MView units) / Used by (generated from the uses clauses), then the unit's own extra sections. Comments only: a script checked that every file outside its header is unchanged.
+- Old statements that no longer matched the code were corrected (uInputHandler's purpose, uMousePage's key rows, uMouseProfile's zone names (only with D), uIOGate's "a worker never waits", uGLRenderer's overlay colour and mipmaps, uConfig's "only TConfig touches the ini", the lock count in uJobQueue / uImageCache, uMView's disk rule, uNavigator's scan thread and tree, uMediaLoader's cancellation notes, uImageSaver's purpose).
+- docs\architecture\: MView_Architecture.md / .docx with two pictures (mview_unit_dependencies: 38 units, 107 uses, 7 layers, no cycles; mview_runtime_interactions: threads and the path of one image from click to screen), a one-line table of all units and the rules the structure follows.
+- Noticed, not changed: uInputHandler is retired but still compiled (listed in MView.lpr and the project); some uConfig settings are never read from MView.ini.
+
+## A homage to Hamana (user: "i want it to be a hommage to hamana ... all of this is important")
+
+- readme.md: the dedication at the top (Hamana by Makito Miyano, last version 1.48, 2006; "fast first, mouse first, never in the way"), how to use MView, the documentation map, the principles.
+- Menu: "About MView" (above Exit) shows what MView is and the dedication (uMainForm, AboutText, Application.MessageBox).
+- docs\From_Hamana_to_MView.md / .docx: why the homage, Hamana in brief (from its own readme, v1.45, 2005-10-10: DirectX drawing, read-ahead with no waiting, no registry, written for a GeForce 3), what MView kept, what it changed and why, the Hamana profile, the principle, respect (no Hamana code, formats, artwork or text; the name belongs to its author).
+- mouse\Hamana.mouse (and a copy next to MView.ini in build\): Hamana's mouse as set up in the user's Hamana.key: wheel = images by name at the top right, by date at the bottom left, zoom elsewhere; the four gestures; right click = original size; wheel click / Enter = fullscreen; Space = next image. MView's own choices where Hamana had none or differed: X1 = zoom mode, X2 = menu, top-left click / double-click = edit mode on / off, tilt = folders, one thing per zone. Switch in MView.ini: [Mouse] Profile=Hamana.mouse (back: Profile=Default.mouse). The file must exist first, or MView writes its default profile under that name.
+- Spec: §1.1 the homage, §2.0 the first principle "Fast first, mouse first, never in the way", §9.2 other profiles.
+- The Back command's caption now says "else the settings screen" (it said "else exit" since Esc changed).
+- Review (independent) found and fixed: the ini key is Profile, not MouseProfile (the instructions would have done nothing); the menu on a right double-click made every right click wait for the double-click time and opened the menu with the button still held (now on X2, the right click is instant); the X2 wording; the cursor could come back hidden after the About box.
+- Tests: TestMouse loads the shipped mouse\Hamana.mouse: no errors, zones and orders, gestures, buttons, keys; the engine with it: top right = by name then next image, bottom right = zoom in, right click = original size at once, X2 = menu.
+
+## To test (next session)
+
+1. build_test.bat: TestMouse with the new Hamana profile checks.
+2. Menu: About MView.
+3. Copy mouse\Hamana.mouse next to MView.ini (already there in build\), set [Mouse] Profile=Hamana.mouse, restart: browse like in Hamana.
+
+## Going public (user: pre-release on GitHub)
+
+- Name: Versarite MView (Versarite = the user's GitHub name and domain). MView stays the program's name in the code; "VersaView" was dropped (a Rockwell Automation trademark), and "MView" alone clashes with a bioinformatics tool.
+- Licence: GNU GPL v3 (user's choice): LICENSE (the official text), readme section, About box.
+- readme: title, status (v0.19.0-alpha), Building (Lazarus 4.x, FPC 3.2.2, BGRABitmapPack, LazOpenGLContext, SynEdit), License, "What is not in this repository".
+- .gitignore: hamana\ (Hamana's own files), docs\hamana_screens\, *.zip, test build leftovers, and test\images\ except the GIF test set.
+- docs\release_notes_v0.19.0-alpha.md.
+- TestMouse: the new test used maEditModeOn / maEditModeOff; the enum names are maEditOn / maEditOff (EditModeOn / EditModeOff are only the names in the profile file). Fixed; every identifier of the new test checked against the source.
+- To check before publishing: where the animated_* / static_* GIF test suite (test\images\gif, frames\) comes from and its licence; the empty stray file test\9.
+

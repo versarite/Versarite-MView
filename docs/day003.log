@@ -1,0 +1,224 @@
+============================================================
+Session 003
+Date: 2026-07-12
+
+Project: MView
+
+Theme
+-----
+
+Creation of the first working Lazarus project and the
+foundation of the MView architecture.
+
+============================================================
+Achievements
+============================================================
+
+✓ Lazarus project successfully created.
+
+✓ Project compiles and runs correctly.
+
+✓ Source tree registered with Lazarus.
+
+Current registered source folders
+
+    source\main
+    source\core
+
+The remaining source folders will be added as they become
+active.
+
+============================================================
+Project Structure
+============================================================
+
+Confirmed project layout
+
+MView
+│
+├── benchmarks
+├── build
+├── docs
+├── lib
+├── mouse
+├── source
+│   ├── main
+│   ├── core
+│   ├── navigation
+│   ├── rendering
+│   ├── imaging
+│   ├── scripting
+│   ├── cache
+│   ├── config
+│   └── utility
+├── specs
+└── test
+
+============================================================
+Lazarus Lessons Learned
+============================================================
+
+Lesson 001
+
+Renaming a form manually may leave stale references inside
+the project (.lpi).
+
+After every rename:
+
+• Check Project Inspector.
+• Remove missing units.
+• Add renamed unit.
+• Perform Clean and Build.
+
+Lesson 002
+
+Unit search paths should be configured once at project level
+instead of relying on individual file locations.
+
+============================================================
+Architectural Decisions
+============================================================
+
+The application will be organised as
+
+Windows
+    │
+    ▼
+TMainForm
+    │
+    ▼
+TMView
+    │
+    ├── TConfig
+    ├── TNavigator
+    ├── TRenderer
+    ├── TMouseEngine
+    ├── TImageCache
+    └── ...
+
+TMainForm represents the Windows interface.
+
+TMView represents the application itself.
+
+============================================================
+Design Decisions
+============================================================
+
+TMView becomes the central application object.
+
+Responsibilities
+
+• Create subsystem objects.
+• Own subsystem objects.
+• Destroy subsystem objects.
+• Coordinate interaction.
+
+TMView deliberately does NOT
+
+• Display images.
+• Load images.
+• Navigate directories.
+• Handle mouse input.
+
+Those responsibilities belong to specialised classes.
+
+============================================================
+Object-Oriented Programming Notes
+============================================================
+
+Constructor
+
+A constructor creates and initializes an object.
+
+Example
+
+    FMView := TMView.Create;
+
+The constructor prepares the object for use.
+
+------------------------------------------------------------
+
+Fields
+
+A field is a variable belonging to an object.
+
+Example
+
+    FConfig : TConfig;
+
+A field stores either
+
+• a value
+
+or
+
+• a reference to another object.
+
+------------------------------------------------------------
+
+Ownership
+
+The object creating another object is normally responsible
+for destroying it.
+
+Example
+
+TMView creates
+
+    TConfig
+
+Therefore
+
+TMView also destroys
+
+    TConfig
+
+This ownership model will be used consistently throughout
+MView.
+
+============================================================
+Coding Philosophy Reinforced
+============================================================
+
+The code should explain HOW.
+
+Comments should explain WHY.
+
+Architecture comes before implementation.
+
+Small, specialised classes are preferred over large,
+multi-purpose classes.
+
+============================================================
+Milestone
+============================================================
+
+Milestone 0.01
+
+✓ Clean Lazarus project.
+
+✓ Stable directory structure.
+
+✓ Coding conventions established.
+
+✓ First core class (TMView) designed.
+
+✓ Successful compilation.
+
+============================================================
+Next Session
+============================================================
+
+1. Implement uMView.
+
+2. Design and implement TConfig.
+
+3. Introduce ownership of subsystem classes.
+
+4. Connect TMView to TMainForm.
+
+No image loading yet.
+
+The architecture remains the priority.
+
+============================================================

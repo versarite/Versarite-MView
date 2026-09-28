@@ -1,0 +1,63 @@
+# Session log — 25/26 September 2026
+
+Phases B (finished), C and D, plus the first mouse control. Details of each step are in day011–day014.log; this is the overview of the whole session.
+
+## What was done
+
+**Phase B wrap-up (measuring).** Diagnostics line (D key, [Debug] ShowFPS) and timing log (timing.csv, [Debug] TimingLog). Delivery safety net: queued thread results are picked up by a 50 ms timer (TMView.PumpDeliveries), after "image name shown but picture never came" after fast scrolling.
+
+**Phase C (preloading).**
+- Own JPEG decoder on pasjpeg (uJpegDecoder): really cancellable (the FPC reader's progress hook is an empty "ToDo"), rows straight into the bitmap, DCT scaling 1/2..1/8 for the quick view.
+- Quick view (Screen quality) first, full image later without resetting the view.
+- Wanted set: current, preload ahead/behind across folders (TNavigator.FilesAhead), several decode threads with one kept free for the current image, promote-don't-restart.
+- Cache by quality, eviction by distance from the current image, automatic size (25 % of RAM).
+- I/O gate: the folder scanner waits while the current image's file is read.
+- EXIF orientation (uExifOrientation + 8 test pictures, TestExif: 20 checks).
+- Quick view made to fit the window exactly on the worker (uImageScaling: box average + final linear step): paint of a quick view 340 ms -> 4 ms.
+- Full size only after 0.7 s on an image or at once on zoom (RefineDelayMs).
+- WIC (Windows Imaging Component) for full-size JPEGs (uWicDecoder), own decoder as fallback.
+
+**Phase D (GPU).** TGLRenderer / TGLMediaView (LazOpenGLContext): tiled textures (2048, 1-pixel overlap), mipmaps, nearest from 400 %, pixels straight from the BGRABitmap, stepwise upload with the screen copy shown first, text bars as textures, fallback to the CPU renderer with the reason in the D line, textures restored after the window is recreated. Shared view model (TRenderer): zoom at a point, pan, free rotation angle, fit of the turned bounding box.
+
+**Mouse control (interim default profile, uInputHandler).** Wheel = browse; X1 = zoom mode on/off, X2 = rotate mode on/off (wheel: zoom at the mouse / 5° per notch, 1° with Shift); left drag = pan; double-click = fit <-> 100 % at the point clicked; Z / R / L keys; Esc leaves a mode. All through commands with values (TCommandArgs), ready for the mouse language.
+
+**Debugging aid.** Context menu "Save current image (debugging)": the decoded image (PNG, background thread) and a picture of the window (GPU: read back from the frame) into [Debug] SaveImageDirectory (default ..\test\saved_images\). Checked: both files correct (colours, row order, rotation, 695 %, nearest filtering). Claude can read this folder: direct feedback from now on.
+
+## Measurements (GTX 960M laptop, 108 MP photos 12000 x 9000)
+
+| | before | now |
+|---|---|---|
+| next image (preloaded) | ~350 ms, several s when skipping | 0–8 ms |
+| quick view decode (1/8) | – | ~600 ms on a worker, ahead of time |
+| quick view paint | 340 ms | 4 ms |
+| full decode 4000 x 3000 | pasjpeg ~1 s | WIC 120–160 ms |
+| full decode 12000 x 9000 | 6.1 s (pasjpeg) | not yet measured with WIC |
+
+## Lessons learned
+
+- Lazarus saves its open editor buffers over changed files when building. Close tabs (No to saving) or File > Reload before building after Claude changed files. Claude now checks the files on disk after each reported build.
+- LCL 4.6: TControl.WMXButtonUp never reports the release of X1/X2 (it looks for the button in the "buttons down" flags). Side buttons must work on the press only.
+- FPC GL unit: functions are procedure variables; in an expression they need () (glGetError()).
+- The FPC JPEG reader (fpreadjpeg) can't be cancelled and is slow (per-pixel virtual calls).
+
+## Open items (next session)
+
+1. **GPU upload is slow**: about 450 ms per 2048 x 2048 tile (4000 x 3000: 1.8 s; a cached full image: first paint ~900 ms, because one tile exceeds the 12 ms budget). Suspects: GL_GENERATE_MIPMAP done by the driver on the CPU, or the GL_BGRA / GL_UNSIGNED_BYTE / UNPACK_ROW_LENGTH path. Plan: measure upload and mipmaps separately; try glGenerateMipmap (GL 3.0), GL_UNSIGNED_INT_8_8_8_8_REV, smaller tiles (1024) for finer steps, or a PBO.
+2. **Rotation around the mouse position** (user request): X2 + wheel should turn around the point under the mouse, like zoom. Math: Pan' = R(Pan + C - q) + q - C (C = window centre, q = mouse). cmdRotateBy gets X, Y.
+3. **Mouse gestures** for previous / next directory and exit (before the full mouse language).
+4. **Program icon** (proposal below), not implemented yet.
+5. TIFF quick view, when the microscopy TIFF archives are in test\images\tiff.
+6. Full-size decode of the 108 MP photos with WIC: measure (stay on one for a few seconds with TimingLog=1).
+7. Specification v1.2d: write Phases B–D decisions back into the spec (wanted set, quality levels, WIC, GPU tiles, input profile, X-button behaviour).
+8. Small: both saved file names should share one time stamp.
+
+## Icon proposal (homage to Hamana)
+
+Hamana's icon (extracted from Hamana.exe, 16 and 32 px) is a red torii standing in water against an evening sky. Very likely the torii of Bentenjima at Lake Hamana (Hamanako), which the program's name suggests (not confirmed).
+
+Proposal for MView: **"the torii in the eyepiece"**.
+- A round field of view, like looking through a microscope eyepiece: dark ring (the tube), inside a warm evening gradient (orange at the top, fading into blue-grey water at the bottom).
+- In the centre a simplified red torii (two posts, the curved top beam and the straight tie beam), with a short reflection in the water.
+- A thin crosshair or a small scale bar across the lower part of the field: the microscopy side of MView.
+- Flat shapes, few colours, so it still reads at 16 px: at 16/20/24 px only the ring and the red torii remain (no gradient, no crosshair).
+- Sizes 16, 20, 24, 32, 40, 48, 256 like the current MView.ico (the blue paw).

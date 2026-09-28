@@ -1,0 +1,1 @@
+wheel click toggles full screen

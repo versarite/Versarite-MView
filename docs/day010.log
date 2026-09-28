@@ -1,0 +1,106 @@
+# Day 010 – Phase A: Clean Foundation
+
+## Theme
+
+Today's work started Phase A of the v1.2c roadmap: a clean, still synchronous viewer that the threading work of Phase B can build on. Most items of the spec's list "Current code vs. this spec" (§16) are now handled in the code.
+
+Everything was written without a compiler at hand, so the first step on the Windows PC is a build and a run of the navigation test.
+
+## Navigation
+
+The navigator was rewritten around three rules.
+
+The directory tree is built **once**, when a file or folder is opened. Moving between folders only rescans the image list of the target folder. The earlier version rebuilt the tree at every step, rooted at the folder it was checking, which destroyed its own map and made empty folders impossible to skip.
+
+The navigation root is chosen like this:
+
+```text
+mview.exe C:\Exp            -> root C:\Exp
+mview.exe C:\Exp\Day1\a.tif -> root C:\Exp  (parent of the file's folder)
+```
+
+So sibling folders are reachable when a single image is opened. If the parent is a drive root, the file's own folder is used, so a whole drive is never scanned on the UI thread.
+
+Landing positions:
+
+```text
+next image, next / previous directory  -> first image
+previous image across a folder         -> last image of that folder
+opening a folder without images        -> first folder after it with images
+```
+
+Folders without images are skipped. With only one folder that has images, the last image wraps to the first (§16 #6). `WrapScope=Folder` in the ini keeps next/previous image inside the current folder.
+
+The tree scan skips junctions and links (they can loop), hidden system folders, and anything deeper than 32 levels.
+
+## Natural Sort
+
+File and folder names now compare naturally: runs of digits by value, the rest case-insensitive.
+
+```text
+Image2 < Image10      scan_9 < scan_010      D2 < D10
+```
+
+Images with the same date are ordered by name, so the order never depends on the sort algorithm (the test images written within one second showed that problem).
+
+## One List of Formats
+
+`uImageFormats` holds the only list of supported extensions: TIFF, JPEG, PNG, BMP, GIF. Directory listing and the loader both use it (§16 #10).
+
+## Decoded Images
+
+`IDecodedImage` (spec §7.2) now exists. `TMediaLoader.Load` returns decoded BGRA pixels, or an error entry for files that can't be decoded. The renderer no longer opens files (§16 #1, #2).
+
+Reference counting means the loader, renderer and later the cache can share one image safely.
+
+## Renderer
+
+The CPU renderer now:
+
+- receives `IDecodedImage` and draws a placeholder when there is none or it failed (§16 #7, no more crash on an empty folder);
+- scales only the visible part of the image, so zooming into a large image costs about one screen of pixels;
+- no longer leaks the resampled bitmap on every zoom step;
+- uses filtered resampling below 100 % and plain pixel stretching from 100 % up, so single pixels stay sharp;
+- supports fit, 1:1, zoom and 90° rotation;
+- takes the zoom step from the ini (§16 #9);
+- draws a one-line info overlay: file, position, sort order, scale.
+
+## Commands
+
+Input only produces commands now (§16 #8). `TMediaView` maps keys to `TCommand` values; `TMView.Execute` carries them out.
+
+```text
+→  PgDn  Space      next image           Home   fit
+←  PgUp  Backspace  previous image       End    1:1
+↓                   next directory       + −    zoom
+↑                   previous directory   R  L   rotate right / left
+S   sort by date / name                  I      info overlay
+F5  rescan                               Enter  fullscreen
+Esc exit                                 wheel  next / previous image (until Phase F)
+```
+
+Zoom moved from ← → to + and −, because the arrows now browse.
+
+## Startup
+
+No more dialogs (§16 #4). MView starts from the first command-line argument (a file or a folder). Without one, it resumes the last session: `LastDirectory` is the navigation root, `LastFile` the image to start on. Without a last session, it shows a short hint. The right-click menu contains only Exit.
+
+## Configuration
+
+`TConfig` now starts from built-in defaults and reads the ini on top of them, so missing keys keep sensible values. New keys: `LastFile`, `ShowInfo`, `WrapScope`, `PlaceholderForBadImages`, `ZoomStepPercent`. `SortMode` is stored by name, as in `MView.ini.test`.
+
+## Tests
+
+`test\TestNavigation.lpr` was extended to 54 checks: natural order, format list, tree order, date and name sorting, skipping empty folders, landing on the last image, wrap per tree and per folder, a single folder, an empty tree, the root rules, resuming, and keeping the current file when the sort order changes.
+
+## Still Open in Phase A
+
+These need the IDE (spec §19.4):
+
+- BGRABitmap as a package from the Online Package Manager instead of a source path.
+- Two build modes, Debug and Release.
+- Deleting dead files: `uMedia.pas`, `___old__uMediaLoader.pas`, `uempty.pas`, `mview.lpk`, `mview.pas`, `uMainForm.pas.old` and the `backup` folders.
+
+## Result
+
+First build on the Windows PC: success, no errors. Run with `test\images` as the parameter: A → B → C → D → E → F → H → A, with the empty folders (the three sub folders, and G, which holds only H) skipped as intended.

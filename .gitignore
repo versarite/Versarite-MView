@@ -1,0 +1,38 @@
+# Build output (spec §19.5)
+build/
+lib/
+backup/
+*.lps
+*.bak
+*.old
+*.compiled
+*.ppu
+*.o
+*.or
+*.res.bak
+*.exe
+*.dbg
+
+# Test program output
+test/*.exe
+test/*.ppu
+test/*.o
+test/*.a
+test/lib/
+test/saved_images/
+
+# Not ours to publish, or private (see readme, "What is not in this repository")
+hamana/
+docs/hamana_screens/
+*.zip
+
+# Test images: only the sets the tests need are published (all made for
+# testing); the rest is private microscopy data, photos, large NASA images.
+test/images/*
+!test/images/gif/
+!test/images/exif/
+!test/images/thumb/
+# The outside GIF test suite: source and licence unknown (TestGif skips it)
+test/images/gif/animated_*
+test/images/gif/static_*
+test/images/gif/frames/

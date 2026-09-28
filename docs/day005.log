@@ -1,0 +1,362 @@
+============================================================
+MView Development Log
+Day 5
+============================================================
+
+Status
+
+Bootstrap phase completed.
+The individual subsystems now collaborate to form the application's
+first complete processing pipeline.
+
+------------------------------------------------------------
+Major Milestone
+------------------------------------------------------------
+
+Current application flow:
+
+    TMainForm
+        │
+        ▼
+    TMView
+        │
+        ▼
+    TMediaLoader
+        │
+        ▼
+    TMedia
+        │
+        ▼
+    TRenderer
+
+Although nothing is rendered yet, this establishes the complete
+application workflow.
+
+------------------------------------------------------------
+New Unit
+------------------------------------------------------------
+
+Created:
+
+    uRenderer
+
+Responsibilities
+
+- Display media.
+- Own rendering resources.
+- Apply view transformations.
+
+Does NOT
+
+- Load media.
+- Navigate directories.
+- Handle mouse input.
+
+------------------------------------------------------------
+Architecture
+------------------------------------------------------------
+
+Established the distinction between
+
+Coordinator
+
+    TMView
+
+and Workers
+
+    TConfig
+    TNavigator
+    TMediaLoader
+    TRenderer
+
+TMView coordinates the application.
+
+Subsystems perform one clearly defined task.
+
+------------------------------------------------------------
+TMView.OpenMedia()
+------------------------------------------------------------
+
+Added the first real application command.
+
+Responsibilities
+
+- Request media from TMediaLoader.
+- Receive a TMedia object.
+- Pass the media to TRenderer.
+
+This is the first successful collaboration between independent
+subsystems.
+
+------------------------------------------------------------
+Ownership
+------------------------------------------------------------
+
+Adopted the ownership rule:
+
+"The object that creates another object is responsible for
+destroying it."
+
+Current ownership tree
+
+    TMainForm
+        │
+        ▼
+    TMView
+        │
+        ├── TConfig
+        ├── TNavigator
+        ├── TMediaLoader
+        └── TRenderer
+
+Future classes will explicitly document ownership.
+
+Example
+
+    { Owned subsystems
+      Created in Create.
+      Destroyed in Destroy.
+    }
+
+------------------------------------------------------------
+Object-Oriented Concept
+------------------------------------------------------------
+
+Important conceptual breakthrough.
+
+Difference between
+
+Local variables
+
+- temporary
+- exist only during a procedure call
+
+Fields
+
+- belong to the object
+- exist during the object's lifetime
+- represent what the object knows
+
+Example
+
+TConfig stores
+
+    FLastDirectory
+    FWrapAround
+    FSortMode
+    FCacheSizeMB
+
+These values remain available throughout the application's
+entire lifetime.
+
+This marks an important transition from procedural programming
+toward object-oriented thinking.
+
+------------------------------------------------------------
+Configuration
+------------------------------------------------------------
+
+Designed Version 1 of MView.ini.
+
+Sections
+
+    Startup
+    Window
+    View
+    Navigation
+    Performance
+    Mouse
+    Renderer
+
+Design decisions
+
+- Command line overrides configuration.
+- Configuration stores user preferences.
+- Session information will eventually be stored separately.
+- TConfig exposes typed properties.
+- Only TConfig reads and writes the INI file.
+
+------------------------------------------------------------
+TConfig
+------------------------------------------------------------
+
+Designed the first real interface.
+
+Responsibilities
+
+- Read MView.ini
+- Validate configuration
+- Store configuration as object state
+- Save configuration
+
+Configuration values are stored as object fields,
+not temporary variables.
+
+------------------------------------------------------------
+Hamana Discussion
+------------------------------------------------------------
+
+Analyzed Hamana's interaction model.
+
+Observation
+
+The image itself becomes the manipulated object rather than
+being constrained inside a window.
+
+Future renderer model
+
+    Media
+
+        +
+
+    ViewState
+
+        ↓
+
+    Renderer
+
+        ↓
+
+    Screen
+
+Only the ViewState changes.
+
+The original media remains unchanged.
+
+------------------------------------------------------------
+Future ViewState
+------------------------------------------------------------
+
+Identified a future class.
+
+    TViewState
+
+Expected responsibilities
+
+- Zoom
+- Rotation
+- Pan
+- Mirror
+- Fit mode
+- Interpolation
+
+Renderer will transform the media according to the ViewState.
+
+------------------------------------------------------------
+Mouse Architecture
+------------------------------------------------------------
+
+Decided against a transparent overlay window.
+
+Instead
+
+    Windows Messages
+
+            ↓
+
+      Mouse Engine
+
+            ↓
+
+        Commands
+
+            ↓
+
+         TMView
+
+Mouse events become commands.
+
+Subsystems never receive raw Windows mouse messages.
+
+This architecture naturally supports future scripting.
+
+------------------------------------------------------------
+Coding Standard
+------------------------------------------------------------
+
+Added project documentation standard.
+
+Each important class should document
+
+- Purpose
+- Owns
+- Knows
+- Responsibilities
+- Does NOT
+
+These comments describe architecture rather than implementation.
+
+------------------------------------------------------------
+Lazarus Lesson
+------------------------------------------------------------
+
+Encountered a corrupted form-designer state
+("dangling reference").
+
+Resolution
+
+Recreated the form.
+
+Because application logic already resides outside the form,
+the recovery was straightforward.
+
+Lesson
+
+Forms should remain thin shells.
+
+------------------------------------------------------------
+Current Project Structure
+------------------------------------------------------------
+
+Presentation
+
+    TMainForm
+
+        │
+
+        ▼
+
+Application
+
+    TMView
+
+        │
+
+        ├── TConfig
+        ├── TNavigator
+        ├── TMediaLoader
+        └── TRenderer
+
+------------------------------------------------------------
+Planned Next Session
+------------------------------------------------------------
+
+1. Implement TConfig.Load() and Save().
+
+2. Introduce typed enumerations in uTypes
+   (TFitMode, TInterpolationMode, etc.).
+
+3. Replace string configuration values with
+   strongly typed properties.
+
+4. Begin the first renderer implementation.
+
+5. Display the first image through the complete
+   application pipeline.
+
+------------------------------------------------------------
+Personal Note
+------------------------------------------------------------
+
+Today was an important conceptual milestone.
+
+The most valuable result was not adding another class,
+but understanding ownership and object state.
+
+Objects are no longer viewed as collections of procedures.
+
+Instead, they are long-lived entities that own knowledge,
+coordinate responsibilities, and collaborate with other objects.
+
+This marks the transition from procedural programming
+to a genuinely object-oriented architecture.

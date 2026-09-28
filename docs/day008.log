@@ -1,0 +1,283 @@
+# Day 008 – TMediaView Rendering Foundation
+
+## Theme
+
+Today's work moved MView from the basic first-image milestone toward a proper renderer and viewing-surface architecture.
+
+The first image was successfully displayed, and we then implemented the first real rendering behavior: fitting the image to the available viewing area while preserving its original aspect ratio.
+
+The guiding principle for today's work was:
+
+> Build the rendering geometry cleanly now so zoom, pan, rotation, and future interaction can be added without redesigning the renderer.
+
+## TMediaView and Renderer
+
+The PaintBox was removed from the application.
+
+TMediaView is now the application's drawing surface and fills the available client area of the form.
+
+The renderer receives the TMediaView canvas and therefore works with the actual available viewing area rather than depending directly on the form dimensions.
+
+Conceptually:
+
+```
+MainForm
+    │
+    ▼
+TMediaView (drawing surface)
+    │
+    ▼
+TRenderer.Paint(ACanvas)
+```
+
+This keeps the renderer independent of the surrounding form layout.
+
+## Fit-to-Screen Rendering
+
+The initial display behavior is now defined as:
+
+- fit the complete image into the available viewing area
+- preserve the original aspect ratio
+- center the image
+- show black background in unused areas
+
+The fit calculation was separated into a function:
+
+```
+CalculateFit(ACanvasWidth, ACanvasHeight): Double
+```
+
+The function returns the scale required to fit the complete image into the available canvas.
+
+Conceptually:
+
+```
+scaleX = viewport width  / image width
+scaleY = viewport height / image height
+
+FitScale = minimum(scaleX, scaleY)
+```
+
+The displayed dimensions are then calculated from FitScale, followed by the centered X/Y position.
+
+## Canvas, Position and Size
+
+An important distinction was clarified during implementation.
+
+The canvas defines the available viewing area:
+
+```
+ACanvas.Width
+ACanvas.Height
+```
+
+The bitmap already has its own width and height.
+
+The Draw operation:
+
+```
+FDisplayBitmap.Draw(ACanvas, X, Y, True);
+```
+
+means:
+
+- ACanvas = destination
+- X/Y = top-left position of the bitmap on the destination canvas
+- True = transparency handling
+
+Width and height are not supplied to Draw because FDisplayBitmap has already been created at the desired display dimensions.
+
+The scaling occurs earlier through Resample:
+
+```
+FBitmap
+    │
+    │ Resample(DisplayWidth, DisplayHeight)
+    ▼
+FDisplayBitmap
+    │
+    │ Draw(ACanvas, X, Y, True)
+    ▼
+TMediaView
+```
+
+## Display Bitmap Cache
+
+We introduced a second bitmap in TRenderer:
+
+```
+FBitmap
+FDisplayBitmap
+```
+
+FBitmap is the decoded source image.
+
+FDisplayBitmap is the prepared image at the current display dimensions.
+
+The renderer now resamples only when the required display dimensions change.
+
+The logic is:
+
+```
+Paint
+ │
+ ├── calculate required display size
+ │
+ ├── size changed?
+ │       │
+ │       ├── YES → resample FBitmap
+ │       │
+ │       └── NO  → reuse FDisplayBitmap
+ │
+ └── draw FDisplayBitmap
+```
+
+This is an important performance improvement because ordinary repainting no longer causes a new resampling operation.
+
+When a new image is loaded, the cached display dimensions are reset so the display bitmap will be regenerated for the new source image.
+
+## TViewState
+
+A view-state structure has been introduced in preparation for interaction:
+
+```
+TViewState = record
+  Zoom: Double;
+  PanX: Double;
+  PanY: Double;
+  Rotation: Integer;
+end;
+```
+
+The state is initialized in TRenderer.Create.
+
+At present the state is only partially used. It establishes the intended architecture for later zooming, panning and rotation.
+
+## Agreed Viewing Behavior
+
+We clarified the target behavior based on the original Hamana functionality.
+
+### Initial display
+
+For the current implementation:
+
+- Fit-to-screen
+- Preserve aspect ratio
+- Center the image
+
+A future interaction mode may allow the initial display behavior to depend on the mouse quadrant. One quadrant could select original-size display, while another could select fit-to-screen.
+
+This is reserved for later and is not implemented now.
+
+### Panning
+
+Panning is intended to be unrestricted.
+
+A large image displayed at original size should be freely movable through the viewing area.
+
+The image may:
+
+- be partially outside the viewport
+- extend far beyond the viewport
+- eventually be moved completely outside the viewport
+
+Areas not covered by the image remain background.
+
+When navigating to another image, the view should reset to a centered initial state.
+
+### Zoom
+
+The agreed initial zoom behavior is screen-centered zoom.
+
+The conceptual relationship will be:
+
+```
+FitScale × Zoom = ActualScale
+```
+
+Therefore:
+
+```
+Zoom = 1.0  → fit-to-screen
+Zoom = 2.0  → twice the fitted size
+```
+
+Zooming should preserve the screen center as the fixed point, even when the image is already partially off-screen.
+
+A future enhancement is reserved for zooming around the mouse pointer. This is intentionally not part of the current implementation.
+
+### Rotation
+
+Rotation remains part of the planned renderer/view transformation and will be integrated after the basic zoom/pan behavior is established.
+
+## Performance Considerations
+
+The current display bitmap cache is a small renderer-level optimization.
+
+It is not the future ImageCache described in Day 007.
+
+The long-term architecture remains:
+
+```
+TMView
+    │
+    ├── TJobScheduler
+    ├── TMediaLoader
+    ├── TImageCache
+    ├── TRenderer
+    ├── TNavigator
+    └── TDirectoryScanner
+```
+
+The renderer should eventually consume already-decoded images and concentrate on transformation and display.
+
+Today's work reinforces the Day 007 principle that expensive operations should not happen unnecessarily during ordinary repainting.
+
+## Current Milestone
+
+The first image is displayed successfully.
+
+The image now:
+
+- fits the TMediaView surface
+- preserves its aspect ratio
+- is centered
+- uses a black background for unused areas
+- uses a cached display bitmap for repeated painting
+
+The renderer has also been prepared for the future view-state model.
+
+## Next Session
+
+The next planned implementation step is:
+
+1. Use FViewState.Zoom in the rendering calculation.
+2. Establish:
+
+```
+FitScale × Zoom = ActualScale
+```
+
+3. Keep Zoom = 1.0 visually identical to the current fit-to-screen behavior.
+4. Then introduce PanX/PanY.
+5. Implement free panning before adding mouse interaction.
+6. Later add screen-centered zoom interaction.
+7. Keep cursor-centered zoom as a future enhancement.
+
+## Key Insight
+
+Today's work established an important separation:
+
+```
+Source bitmap
+      ↓
+Display-size bitmap
+      ↓
+Position on viewport
+      ↓
+Canvas
+```
+
+Scaling and preparation are separate from positioning.
+
+This means that later panning can change only X/Y and does not need to resample the image. That is an important foundation for the fluid navigation behavior planned for MView.

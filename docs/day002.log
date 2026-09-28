@@ -1,0 +1,349 @@
+============================================================
+Session 002
+Date: 2026-07-11
+
+Project: MView
+
+Theme
+-----
+
+Established the project's technical foundation, coding standards,
+and development philosophy before writing application code.
+
+------------------------------------------------------------
+Project Organization
+------------------------------------------------------------
+
+Project root
+
+C:\Projects\MView
+
+Directory structure
+
+benchmarks\
+docs\
+mouse\
+source\
+test\
+
+Additional documentation folders
+
+docs\images\
+docs\reverse_engineering\
+
+Source tree
+
+source\
+    main\
+    core\
+    navigation\
+    imaging\
+    rendering\
+    mouse\
+    scripting\
+    cache\
+    config\
+    utility\
+
+Documentation
+
+ProjectVision.md
+DeveloperSpecification.md
+SessionLog.md
+DecisionLog.md
+TODO.md
+
+Test data
+
+Approximately 100 test images added to
+
+test\images\
+
+These become the initial regression and performance dataset.
+
+------------------------------------------------------------
+Development Philosophy
+------------------------------------------------------------
+
+Performance is a primary feature.
+
+Architecture is designed before implementation.
+
+The application shall remain focused on one task:
+
+Fast inspection of scientific microscopy images.
+
+The software is educational.
+
+The source code should teach Object Pascal and software design,
+not merely implement functionality.
+
+------------------------------------------------------------
+Programming Manifesto
+------------------------------------------------------------
+
+1. Performance is a feature.
+
+2. Architecture before implementation.
+
+3. One responsibility per class.
+
+4. Code should teach.
+
+5. Comments explain WHY.
+
+6. Mouse is the primary interface.
+
+7. Benchmark before optimizing.
+
+8. Every commit must compile.
+
+9. Every important decision is documented.
+
+10. MView remains an image viewer,
+    not a file manager.
+
+Guiding motto
+
+Simple classes.
+Fast execution.
+Clear architecture.
+
+------------------------------------------------------------
+Coding Standard
+------------------------------------------------------------
+
+Indentation
+
+2 spaces
+
+Tabs
+
+Never
+
+Line width
+
+120 characters
+
+begin
+
+Always on a separate line
+
+Declarations
+
+One declaration per line
+
+Naming
+
+Units
+
+uNavigator
+uRenderer
+uImageLoader
+
+Classes
+
+TNavigator
+TRenderer
+
+Fields
+
+FCurrentImage
+
+Properties
+
+CurrentImage
+
+Methods
+
+LoadImage
+NextImage
+PreviousDirectory
+
+------------------------------------------------------------
+Commenting Philosophy
+------------------------------------------------------------
+
+Every unit begins with a descriptive header.
+
+Each class explains
+
+- purpose
+- responsibilities
+- non-responsibilities
+
+Comments explain
+
+WHY
+
+rather than
+
+HOW
+
+Important design decisions should be documented both
+
+inside the code
+
+and
+
+inside DecisionLog.md
+
+Teaching comments are encouraged.
+
+The code base should be understandable by programmers
+learning Object Pascal.
+
+------------------------------------------------------------
+Architectural Decisions
+------------------------------------------------------------
+
+No image database.
+
+Recursive directory scanning.
+
+Internal directory tree.
+
+Thumbnail cache only.
+
+Mouse scripting remains an independent subsystem.
+
+Commands remain independent of user input.
+
+The viewer is command-driven.
+
+------------------------------------------------------------
+Workflow Decisions
+------------------------------------------------------------
+
+Primary workflow
+
+Total Commander
+
+↓
+
+Select experiment
+
+↓
+
+Open in MView
+
+↓
+
+Rapid image inspection
+
+↓
+
+Move interesting images
+
+↓
+
+Return to Total Commander
+
+MView complements file managers.
+
+It does not replace them.
+
+------------------------------------------------------------
+User Interface Philosophy
+------------------------------------------------------------
+
+No menu bar.
+
+No toolbar.
+
+No permanent controls.
+
+Fullscreen image presentation.
+
+Right-click context menu initially contains only
+
+Exit
+
+The image remains the central focus.
+
+------------------------------------------------------------
+Mouse Philosophy
+------------------------------------------------------------
+
+Primary browsing quadrant
+
+Bottom Left
+
+Sort
+
+Date (Newest → Oldest)
+
+Secondary browsing quadrant
+
+Top Right
+
+Sort
+
+Filename (Natural)
+
+Inspection quadrant
+
+Bottom Right
+
+Zoom
+
+Upper Left
+
+Reserved
+
+Default gestures
+
+Gesture Left
+
+Previous Directory
+
+Gesture Right
+
+Next Directory
+
+Gesture Down
+
+Exit
+
+Quadrants represent workflow contexts rather than
+simple screen regions.
+
+------------------------------------------------------------
+Performance Philosophy
+------------------------------------------------------------
+
+Investigate
+
+Fast loading
+
+Aggressive preloading
+
+Directional preload
+
+Cache management
+
+Bitmap reuse
+
+Rendering performance
+
+Performance hypotheses will be verified by benchmark
+programs before implementation.
+
+------------------------------------------------------------
+Next Session
+------------------------------------------------------------
+
+Create the Lazarus project.
+
+Rename generated units.
+
+Compile MView Version 0.01.
+
+Design TApplication.
+
+Design ownership relationships between major subsystems.
+
+No functionality beyond a minimal compiling application
+will be added until the architecture is agreed upon.
+
+============================================================

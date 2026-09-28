@@ -1,0 +1,28 @@
+# Day 13 — Faster quick view, delayed full decode, WIC
+
+## What the timing log showed (end of day 12)
+
+The large test photos are 12000 x 9000 (108 MP), not ~50 MP:
+- quick view (1/8 JPEG decode): ~650 ms on a worker, then ~340 ms PAINT on the UI thread (the 1500 x 1125 quick view was shrunk to the window by BGRABitmap's fine resampler while painting; P_2023 photos 500–590 ms);
+- full size: 6.1 s decode (pasjpeg) + 1.8 s screen copy — the worker that was "busy for a very long time".
+(The 116 s / 62 s rows in that log were debugger pauses on the cancel exception.)
+
+## Changes
+
+1. **Quick view made to fit the window exactly, on the worker.** New unit `source\imaging\uImageScaling.pas`: FitSize (the same fit rule as the renderer) and ShrinkToSize (average K x K blocks in one pass, then a final linear resample by less than 2x). The loader shrinks the quick view to exactly the fitted size, and the full image's screen copy the same way (instead of a fine resample of 108 MP). The renderer draws a bitmap that is within a pixel of its fitted size 1:1 — no resampling on the UI thread. The target size follows the window (form OnResize); after the size has been stable for 400 ms, cached quick views of other files are remade.
+   Expected: paint for a quick view a few ms instead of ~340 ms; screen copy of a full image well under a second.
+
+2. **Full size only when it is wanted.** The full decode of the current image starts after it has been shown for `RefineDelayMs` (default 700), or at once on zoom in (+) / 100 % (End). While browsing no worker is tied up with a 100 MP decode.
+
+3. **WIC (Windows Imaging Component) for full-size JPEGs.** New unit `source\imaging\uWicDecoder.pas`: minimal COM declarations (checked against wincodec.h), decode from memory, copied into the BGRA bitmap in bands of ~8 MB with a cancel check between bands. COM is started per decode worker thread (multithreaded). If WIC fails for any reason other than lack of memory, the own Pascal decoder takes over, so images still show. Quick views stay with the own decoder (DCT scaling). EXIF orientation is applied the same way for both decoders.
+
+## Settings ([Performance])
+
+- `UseWIC=1` — 0 = always the own decoder (for comparison in timing.csv).
+- `RefineDelayMs=700` — 0 = full size at once, as before.
+
+## Worth measuring (D line, timing.csv)
+
+- Browse the IMG_2024… photos: `screen` rows should have paint of a few ms; screen_copy_ms is now the time to shrink the quick view on the worker.
+- Stay on one: after 0.7 s a worker starts; the `full` row shows decode_ms with WIC (compare with UseWIC=0: 6.1 s) and screen_copy_ms (was 1.8 s).
+- Resize the window (or leave fullscreen): after a moment the neighbours' quick views are remade.

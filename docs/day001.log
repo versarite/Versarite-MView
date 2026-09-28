@@ -1,0 +1,306 @@
+Absolutely. Here's what I would put into **SessionLog.md** for today's work.
+
+---
+
+# Session 001
+
+**Date:** 2026-07-10
+
+## Overview
+
+Started the design of **MViewer**, a native Lazarus/Free Pascal image viewer for rapid inspection and sorting of scientific microscopy images.
+
+The project is intended as:
+
+* a practical tool for microscopy image review,
+* an educational project to improve Object Pascal and software architecture skills,
+* an open-source project with high-quality documentation.
+
+FlowerWeb remains the primary project. MViewer is developed as an occasional side project.
+
+---
+
+# Project Vision
+
+Develop a viewer that is:
+
+* extremely responsive
+* fullscreen oriented
+* mouse driven
+* optimized for large microscopy image collections
+* configurable through a scripting language
+* educational to read and understand
+
+The goal is **not** to clone Hamana, but to build an original viewer that eventually exceeds it for scientific workflows.
+
+---
+
+# Primary Workflow
+
+The application is intended for rapid inspection of microscopy experiments.
+
+Typical workflow:
+
+Open experiment
+
+↓
+
+Browse images rapidly
+
+↓
+
+Move interesting images to predefined folders
+
+↓
+
+Continue browsing without interruption
+
+---
+
+# Major Design Decisions
+
+## No image database
+
+Rejected.
+
+Instead:
+
+* recursive directory scan
+* in-memory navigation lists
+* persistent thumbnail cache only
+
+---
+
+## Image formats
+
+Version 1 priorities:
+
+* TIFF
+* JPEG
+* PNG
+* GIF
+* BMP
+
+TIFF is considered the primary scientific format.
+
+---
+
+## Navigation
+
+Navigation is based on:
+
+Directory List
+
+↓
+
+Image List
+
+The navigator maintains indices rather than repeatedly traversing the filesystem.
+
+Navigation wraps around.
+
+Images:
+
+Last → First
+
+Directories:
+
+Last → First
+
+---
+
+## Sort Modes
+
+Images support two sort modes.
+
+* Filename (natural sort)
+* Date
+
+Default:
+
+**Newest → Oldest**
+
+Directory order remains alphabetical.
+
+---
+
+## Mouse Interface
+
+Keyboard support is intentionally minimal.
+
+The mouse is the primary input device.
+
+Quadrants determine command mappings.
+
+Mouse wheel and gestures are programmable.
+
+---
+
+## Mouse Configuration
+
+Decision:
+
+Mouse configuration shall **not** be stored in mviewer.ini.
+
+Instead it will reside in a dedicated mouse configuration (or scripting) file.
+
+Future versions will support multiple mouse profiles.
+
+---
+
+## Architecture
+
+Major modules identified:
+
+* uNavigator
+* uRenderer
+* uImageLoader
+* uPreloader
+* uMouseEngine
+* uConfig
+* uCommands
+* uTypes
+* uThumbnailCache
+
+All interaction inside the application is based on commands.
+
+---
+
+## Scripting Engine
+
+A major architectural goal.
+
+Rather than hard-coding mouse behaviour, user interaction will be controlled by an event-driven scripting language.
+
+Current concept:
+
+Event
+
+↓
+
+Conditions
+
+↓
+
+Commands
+
+Examples:
+
+* WheelUp
+* WheelDown
+* GestureLeft
+* GestureRight
+* GestureDown
+* RightClick
+
+Conditions include:
+
+* Mouse quadrant
+* Mouse edge
+* Keyboard modifiers
+* Future application state
+
+Commands are application commands rather than script functions.
+
+---
+
+# Hamana Study
+
+Hamana will be used only as inspiration.
+
+The project will **not** copy:
+
+* source code
+* scripting language
+* binary configuration format
+* internal implementation
+
+Instead we will study:
+
+* useful commands
+* useful conditions
+* workflow ideas
+* user interaction concepts
+
+All implementations will be original.
+
+---
+
+# Educational Goals
+
+The project is intended to improve understanding of:
+
+* Object Pascal
+* Lazarus
+* object-oriented design
+* threading
+* rendering pipelines
+* parser construction
+* scripting language design
+* software architecture
+* documentation
+
+The repository should be educational.
+
+Documentation should explain **why** decisions were made, not only **how** the code works.
+
+---
+
+# Documentation Strategy
+
+The repository will contain:
+
+* Design Notes
+* Developer Specification
+* Session Log
+* Decision Log
+* TODO
+* Command Reference
+* Mouse Script Reference
+
+Every development session ends with documentation updates.
+
+---
+
+# Guiding Principles
+
+1. Performance before features.
+2. Keep the architecture modular.
+3. The mouse is the primary interface.
+4. Everything becomes a command.
+5. Prefer simple, readable solutions.
+6. Design first, code second.
+7. Keep the project educational.
+8. Build an original application inspired by good ideas, not by copied implementations.
+
+---
+
+# Action Items
+
+### High Priority
+
+* Define `TNavigator`.
+* Define the internal command system.
+* Build the initial Lazarus project.
+* Display a single image fullscreen.
+
+### Documentation
+
+* Begin `DeveloperSpecification.md`.
+* Create `DecisionLog.md`.
+* Create `CommandReference.md`.
+* Create `MouseScriptReference.md`.
+
+### Research
+
+* Build a catalogue of Hamana commands and conditions.
+* Design an original MViewer scripting language.
+* Investigate TIFF support in Lazarus/Free Pascal.
+
+---
+
+## Closing Note
+
+Today's session established the philosophy of the project.
+
+The most important realization was that **the scripting engine is not a configuration file—it is a core subsystem of the application**. From this point forward, MViewer is being designed as an original, educational, open-source project whose primary objective is to provide the fastest possible workflow for scientific image inspection while remaining cleanly architected and easy to understand. I think that's an excellent foundation to build on.

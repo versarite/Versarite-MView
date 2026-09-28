@@ -1,0 +1,293 @@
+============================================================
+MVIEW DEVELOPMENT LOG
+day 6
+ PaintBox Investigation and Rendering Architecture
+============================================================
+
+OBJECTIVE
+---------
+Connect the renderer to a drawing surface and understand how
+Lazarus performs painting.
+
+------------------------------------------------------------
+1. Renderer constructor
+------------------------------------------------------------
+
+The renderer constructor had previously been changed to
+
+    constructor Create(APaintBox: TPaintBox;
+                       AConfig: TConfig);
+
+This complicated object construction because TMView was not
+yet ready to provide these dependencies.
+
+Decision:
+    Revert to
+
+        constructor Create;
+
+until the rendering pipeline is established.
+
+Reason:
+Keep construction simple while the architecture evolves.
+
+------------------------------------------------------------
+2. Introducing SetPaintBox()
+------------------------------------------------------------
+
+Instead of constructor injection, a setter was introduced.
+
+TMView
+
+    procedure SetPaintBox(APaintBox: TPaintBox);
+
+TRenderer
+
+    procedure SetPaintBox(APaintBox: TPaintBox);
+
+This allows the form to supply the PaintBox after all controls
+have been created.
+
+Architecture
+
+    TMainForm
+        │
+        ▼
+    TMView.SetPaintBox()
+        │
+        ▼
+    TRenderer.SetPaintBox()
+
+------------------------------------------------------------
+3. Ownership reminder
+------------------------------------------------------------
+
+TMView owns the renderer.
+
+Therefore
+
+    TMView forwards the PaintBox
+
+instead of
+
+    Renderer attempting to configure itself.
+
+Responsibility remains:
+
+    Form
+        ↓
+    TMView
+        ↓
+    Renderer
+
+------------------------------------------------------------
+4. Public vs Private
+------------------------------------------------------------
+
+Compiler error
+
+    identifier idents no member "SetPaintBox"
+
+Cause
+
+    SetPaintBox had been placed in the private section.
+
+Solution
+
+    Move SetPaintBox into the public section.
+
+------------------------------------------------------------
+5. PaintBox added to MainForm
+------------------------------------------------------------
+
+A PaintBox component was added.
+
+The FormShow event performs
+
+    FMView.SetPaintBox(PaintBox1);
+    FMView.OpenMedia(...);
+
+This successfully connected the rendering pipeline.
+
+------------------------------------------------------------
+6. Verifying execution flow
+------------------------------------------------------------
+
+ShowMessage debugging confirmed
+
+    FormShow
+        ↓
+    OpenMedia
+        ↓
+    Renderer.Render()
+
+All methods execute correctly.
+
+------------------------------------------------------------
+7. PaintBox investigation
+------------------------------------------------------------
+
+Initial observation
+
+    Rendering appeared to do nothing.
+
+Experiment
+
+    PaintBox.OnPaint
+
+was implemented to fill the client area red.
+
+Result
+
+    PaintBox displayed correctly.
+
+Conclusions
+
+✓ PaintBox exists.
+
+✓ PaintBox is visible.
+
+✓ Canvas works.
+
+✓ OnPaint fires correctly.
+
+The issue is therefore NOT the PaintBox.
+
+------------------------------------------------------------
+8. Understanding the paint model
+------------------------------------------------------------
+
+Important discovery
+
+Calling
+
+    Canvas.FillRect(...)
+
+directly from Render()
+
+is not the correct rendering model.
+
+Reason
+
+Windows owns repainting.
+
+A PaintBox only paints when Windows sends a paint message.
+
+Drawing outside that cycle is temporary and may disappear.
+
+------------------------------------------------------------
+9. Invalidate()
+------------------------------------------------------------
+
+Learned the purpose of
+
+    PaintBox.Invalidate;
+
+Invalidate does NOT paint.
+
+Instead it tells Windows
+
+    "This control needs repainting."
+
+Sequence
+
+    Invalidate()
+          ↓
+    Windows posts paint message
+          ↓
+    OnPaint
+          ↓
+    Drawing occurs
+
+------------------------------------------------------------
+10. Future renderer design
+------------------------------------------------------------
+
+Current approach
+
+    OpenMedia()
+        ↓
+    Render()
+
+Future approach
+
+    OpenMedia()
+        ↓
+    Renderer stores current media
+        ↓
+    Invalidate()
+
+Later
+
+    PaintBox.OnPaint
+        ↓
+    Renderer.Paint(Canvas)
+
+This separates
+
+"What should be displayed?"
+
+from
+
+"How should it be drawn?"
+
+------------------------------------------------------------
+11. PaintBox discussion
+------------------------------------------------------------
+
+Question
+
+    Is PaintBox permanent?
+
+Answer
+
+Probably not.
+
+PaintBox has served as an educational stepping stone.
+
+Long-term direction is likely
+
+    TImageView
+
+(a custom control)
+
+which will own
+
+    painting
+    zooming
+    panning
+    resize handling
+    mouse interaction
+    overlays
+    double buffering
+
+Architecture may become
+
+    TMainForm
+         │
+         ▼
+    TImageView
+         │
+         ▼
+    TRenderer
+
+instead of exposing PaintBox directly.
+
+------------------------------------------------------------
+12. Decision
+------------------------------------------------------------
+
+Do not continue investing effort into PaintBox-specific code.
+
+Undo temporary debugging code.
+
+Keep only the architectural improvements.
+
+Next session:
+
+Design the custom TImageView control and migrate the renderer
+to use it as the application's drawing surface.
+
+============================================================
+END OF SESSION
+============================================================

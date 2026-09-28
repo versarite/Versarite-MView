@@ -1,0 +1,13 @@
+object MainForm: TMainForm
+  Left = 273
+  Height = 794
+  Top = 149
+  Width = 777
+  Caption = 'MView'
+  Color = clBlack
+  DesignTimePPI = 120
+  LCLVersion = '4.6.0.0'
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  OnShow = FormShow
+end

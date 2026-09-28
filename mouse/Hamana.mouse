@@ -1,0 +1,72 @@
+; Hamana.mouse - a homage profile for MView.
+;
+; Hamana (Makito Miyano, last version 2006) was the viewer MView grew
+; out of.
+; This profile gives MView Hamana's mouse, as it was set up in the
+; Hamana.key MView's author used for years (decoded in
+; docs\Hamana_Commands.md):
+;   - the wheel steps through the images at the top right (by name)
+;     and at the bottom left (by date), and zooms everywhere else;
+;   - right-drag gestures: left / right = previous / next folder,
+;     up = parent folder, down = exit;
+;   - right click = original size; wheel click = fullscreen;
+;   - Space = next image, Enter = fullscreen.
+;
+; Where MView differs, on purpose:
+;   - Hamana's wheel at the top right also zoomed (its "if" without an
+;     "else"); here each zone does one thing.
+;   - Hamana's X1 / X2 panned; MView pans with the left button, so
+;     X1 = zoom mode (as in MView) and X2 = the menu (Hamana's menu was
+;     on a key). The right click stays instant: no double-click on it.
+;   - Edit mode as in MView: left click in the top left zone = on,
+;     double-click there = off.
+;   - The tilt wheel (Hamana had none) steps through the folders.
+;   - No rotation by mouse (Hamana turned the image with keys).
+;
+; To use it: this file must be next to MView.ini (copy it there FIRST:
+; if MView doesn't find the file, it writes its own default profile
+; under that name). Then, in MView.ini under [Mouse]:
+;   Profile=Hamana.mouse
+; Back to MView's own profile: Profile=Default.mouse
+
+[Anywhere]
+RightClick   = OriginalSize
+WheelClick   = Fullscreen
+LeftDouble   = FitOr100
+TiltLeft     = PreviousFolder
+TiltRight    = NextFolder
+X1           = ZoomMode
+X2           = Menu
+GestureLeft  = PreviousFolder
+GestureRight = NextFolder
+GestureUp    = ParentFolder
+GestureDown  = Exit
+WheelDown    = ZoomIn
+WheelUp      = ZoomOut
+
+[Zone TopLeft]
+Name       = Hamana: zoom, edit
+Order      = None
+LeftClick  = EditModeOn
+LeftDouble = EditModeOff
+
+[Zone TopRight]
+Name       = Hamana: by name
+Order      = Name
+WheelDown  = NextImage
+WheelUp    = PreviousImage
+
+[Zone BottomLeft]
+Name       = Hamana: by date
+Order      = Date
+WheelDown  = NextImage
+WheelUp    = PreviousImage
+
+[Zone BottomRight]
+Name       = Hamana: zoom
+Order      = None
+
+[Keys]
+Space = NextImage
+Enter = Fullscreen
+D     = Diagnostics

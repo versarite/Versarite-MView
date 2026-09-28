@@ -1,0 +1,50 @@
+# Day 14 — Phase D: GPU renderer and mouse control
+
+## GPU renderer (spec §8.5)
+
+New units `source\rendering\uGLRenderer.pas` and `uGLMediaView.pas` (a TOpenGLControl; package LazOpenGLContext, now a project requirement).
+
+- The image goes to the graphics card once, as textures; zoom, pan and rotation only change a transformation.
+- Tiles of up to 2048 x 2048 (a 12000 x 9000 image = 30 tiles), each with a 1-pixel border from its neighbours, so there are no seams.
+- Mipmaps: zoomed-out views stay sharp. From 400 % on, pixels are shown as sharp squares for inspection.
+- Pixels go straight from the BGRABitmap to the GPU (no copy); the bottom-up row order is handled in the texture coordinates.
+- A new image shows its screen copy at once (one small texture); the full image is uploaded in steps of about 12 ms per frame, so the window never stalls, and replaces it when complete. Same for quick view -> full.
+- Text bars (info, diagnostics, mode label, messages) are drawn with BGRABitmap into small textures, only when their text changes.
+- If the GPU refuses the full image (video memory), the small version stays and the D line says so.
+- Needs OpenGL 2.0. If the context can't be created, OpenGL is too old, or only the Windows software OpenGL exists, MView falls back to the CPU renderer automatically; the D line shows why.
+- Window recreated (fullscreen switch): the textures are uploaded again.
+
+Setting: `[Renderer] UseGPU=1` (0 = always the CPU renderer), `UseMipMaps=1`.
+
+The CPU renderer (`uRenderer.pas`, TCpuRenderer) stays as fallback and reference. Both share one view model (TRenderer): fit / 100 %, zoom, pan, and now a free rotation angle. The CPU renderer shows free angles rounded to quarter turns.
+
+## Mouse control (interim default profile, `source\mouse\uInputHandler.pas`)
+
+| Input | Action |
+|---|---|
+| Wheel | next / previous image (browse mode) |
+| X1 (rear side button) | zoom mode on / off: wheel zooms around the mouse position |
+| X2 (front side button) | rotate mode on / off: wheel turns 5° per notch (Shift: 1°), wheel up = clockwise |
+| Left button + drag | pan (any mode; moves under 4 px stay a click) |
+| Double-click | fit <-> 100 %, keeping the point clicked where it is |
+| Z | like X1 |
+| R | hold + wheel = rotate; tap = 90° as before |
+| L | 90° left |
+| Esc | leaves a switched-on mode; in browse mode: exit |
+
+X1 / X2 are plain switches: each press switches the mode on or off (the other button switches over, Esc back to browsing). The release is not used: LCL 4.6 never reports the release of the side buttons (TControl.WMXButtonUp looks for the button in the "buttons down" flags, where Windows no longer lists it) — with hold-to-zoom the mode got stuck. Z works two ways: a quick tap (under 0.5 s, no wheel) switches; hold + wheel = zoom only while held. A label at the top shows the mode ("ZOOM 120 %", "ROTATE 35°"). Mice that send the side buttons as Browser Back / Forward keys work too. Leaving the window (Alt+Tab) ends a Z / R hold.
+
+All of this goes through commands (cmdZoomAt, cmdPanBy, cmdRotateBy, cmdToggleFit, cmdInputMode) with values (TCommandArgs), so the mouse language (Phase F) can produce exactly the same actions; this profile becomes its default.
+
+## Also
+
+- Keyboard + / − now zoom around the window centre (before: around the image centre).
+- Fit while rotated: the turned image's bounding box is fitted, so it shrinks and grows smoothly while turning.
+- Zoom range 1/64 .. 256x.
+
+## To test
+
+1. Reload all files (MView.lpi lists 3 new units and the LazOpenGLContext package), Clean up and Build.
+2. D line: "GPU <graphics card name>"; with a 108 MP photo after 0.7 s: "upload N ms, 30 tiles".
+3. X1 + wheel on a detail: it stays under the mouse. X2 + wheel: smooth rotation. Drag: pan. Double-click: 100 % at that spot.
+4. `[Renderer] UseGPU=0` for comparison with the CPU renderer.

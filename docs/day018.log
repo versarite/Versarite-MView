@@ -1,0 +1,92 @@
+# Day 18 — Phase E: previews, Skim mode, faster quick views
+
+Goal (spec §17): holding the wheel never builds up lag.
+
+## What was found first
+
+The 108 MP photos (IMG_20241126_2004xx–2019xx, 12000 x 9000) and the 12 MP ones of the same day have **no EXIF thumbnail**. The older phone photos have one (P_2023…: 190 x 107, IMG_2023…: 256 x 144). Previews therefore help many files, but not the biggest ones; for those the quick view itself had to get faster (WIC, below).
+
+## Changes
+
+**Preview quality (spec §7.1).** New unit `source\imaging\uJpegHeader.pas`: reads only the start of a JPEG (marker segments up to the frame header) with a file stream: size, EXIF orientation and the EXIF thumbnail. `uExifOrientation` finds the thumbnail (IFD1, tags 0x0201 / 0x0202). The loader decodes it (qlPreview), turns it upright and cuts off black bars when its shape differs from the photo (many cameras store 160 x 120 for 16:9). Files without a thumbnail answer "No preview in this file"; MView remembers them and doesn't ask again.
+
+**Wanted set.**
+- Current image, nothing cached: Preview and Screen, both P0. The thumbnail shows within a few ms and is replaced by the quick view without changing the view (Preview -> Screen -> Full).
+- Previews of the next `PreviewAhead` images (default 10), first among the preloads: they cost a header read each.
+- Screen preloads as before (a cached thumbnail doesn't count as preloaded).
+
+**Skim mode (spec §6).** Steps less than 1/`SkimRate` s apart (default 4 per second) for `SkimEnterMs` (1500 ms) switch to Skim:
+- only previews are wanted (current and ahead); no Screen or Full decodes, no Screen preloads;
+- files without a thumbnail still get a Screen decode, which the next step cancels;
+- the info line says "skimming", the D line "SKIM" (otherwise "browse").
+`SkimExitMs` (250 ms) without a step, or a slow step, switches back: the image you stopped at gets its quick view at once, full size after RefineDelayMs.
+The directory scan is not paused in Skim (spec §5.2 S2); not needed so far.
+
+**Quick views with WIC (`UseWICQuickView=1`).** WIC decodes JPEGs scaled to 1/2 … 1/8 inside the codec (IWICBitmapSourceTransform), like pasjpeg's DCT scaling but expected several times faster (full size: WIC 1 s vs pasjpeg 6.1 s for 108 MP). One call, so it can't be cancelled midway (expected 0.1–0.3 s). CMYK and other formats WIC can't scale fall back to the own decoder.
+
+**Review fixes (independent review):** Skim now always ends properly after a slow step, also when the step doesn't move; a broken file whose thumbnail was readable shows its error (and is skipped with PlaceholderForBadImages=0), not the thumbnail; room is kept for the quick view still to come; overflow guard for huge scaled WIC images.
+
+## Settings ([Performance], with balloon help in the editor)
+
+`PreviewAhead=10`, `SkimEnterMs=1500` (0 = never skim), `SkimRate=4`, `SkimExitMs=250`, `UseWICQuickView=1`. The editor adds them to MView.ini when it opens.
+
+## Tests
+
+TestExif: 40 checks expected (20 new): header, size, orientation and thumbnail of the four new pictures in `test\images\thumb` (made with Python, checked with Pillow; thumb_orient6 uses big-endian EXIF), no thumbnail in orient_1, missing file; AspectCrop (same shape, 16:9 and 9:16 in 160 x 120, under 2 % off, empty).
+
+`test\images\thumb`: open `thumb_plain.jpg` in MView: for a moment you may see the red "THUMB" picture before the blue "MAIN IMAGE" (small files decode fast, so it can be too quick to see). `thumb_letterbox.jpg`: the red preview must fill the frame without black bars.
+
+## To check
+
+1. build_test.bat: 75 + 40 passed.
+2. D line on the P_2023 / IMG_2023 photos: "preview decode 1–5 ms", then "screen".
+3. timing.csv, `screen` rows of the 108 MP photos: decode_ms with UseWICQuickView=1 vs 0 (was ~600 ms).
+4. Hold the wheel in a folder of large photos: after 1.5 s "SKIM" in the D line; release: the image appears within one quick-view time, no catching up.
+
+## TIFF through WIC (same day)
+
+The user put the 108 MP photos into test\images\tiff as TIFF (IrfanView): 12000 x 9000, 24-bit RGB, 9 strips of 1024 rows; `compressed` = LZW with horizontal predictor (53–60 MB), `uncompressed` = 324 MB each. No embedded preview. Until now TIFF went through BGRABitmap / FPReadTiff: always the full image (432 MB in memory, also for preloads), probably slow, not cancellable.
+
+Now (with `UseWIC=1`) TIFF is read by WIC straight from the file (uWicDecoder.DecodeFileWithWic), in bands of 1024 rows (whole strips), with a cancel check between bands:
+- Screen quality: the bands are averaged down by a whole factor while they arrive; only a screen-size bitmap is allocated. Then shrunk exactly to the window's fit (drawn 1:1).
+- Full: the whole bitmap plus a screen copy, as before.
+- WIC can't read a file: FPReadTiff as before. Out of memory: error entry.
+Note: the current TIFF is decoded twice (quick view, then full after RefineDelayMs or on zoom), like JPEG; for LZW each pass costs a full decompression.
+
+To check: D line / timing.csv on both folders (decode ms of `screen` and `full`), and the Phase D test: zoom to 1600 % on a TIFF and pan (smooth?), D line "sharpening n / 108".
+
+## TIFF: first measurements and three fixes (same day)
+
+Measured before the WIC build (old reader, uncompressed 108 MP TIFF): full decode 1712 ms, screen copy 680 ms, GPU per 1024 tile 6.3 ms pixels + 13.1 ms mipmaps (the Day 16 fix: about 8x faster uploads). Hamana needs a little under 3 s for the same file.
+After the WIC build: screen decode 2696 ms, screen copy 344 ms, latency 3096 ms, cache 17 MB instead of ~430 MB per TIFF — but "jobs 3 waiting, 3 of 4 workers busy": three preloads were reading other 324 MB files from the same disk at the same time.
+
+1. **Preloads give the disk to the display job.** The I/O gate so far only held back the folder scanner. Now preload decodes wait at the gate too: before reading a JPEG / other file, between the WIC bands of a TIFF, and every 32 output rows of the quick TIFF reader (IOGate.YieldToDisplay: checks cancel every 50 ms, gives up after 5 s so nothing can hang).
+2. **Uncompressed TIFF quick view reads only the rows it needs** (new unit uTiffQuick): own minimal IFD reader; for uncompressed, strip, 8-bit, chunky RGB / grey files each row's place in the file is known, so the quick view reads 2 rows of every S (a quarter and three quarters into each group) and averages all columns: 81 MB instead of 324 MB at S = 8. Checked with a Python copy of the loop on IMG_20241126_200828.tif (correct picture). Other TIFFs (LZW etc.) go through WIC as before.
+3. **Final resize step own bilinear** (uImageScaling.BilinearResize) instead of BGRABitmap's resampler: the 1500 x 1125 -> 1440 x 1080 step took 344 ms; bilinear with 8-bit fractions, matches Pillow's bilinear within 0.4 levels on average. Also speeds up the JPEG quick views' "screen copy".
+
+To check: the same TIFF again (screen decode, screen copy, latency), the LZW folder, and whether "jobs waiting" still slows the first image.
+
+## Drag and drop (end of the session)
+
+A file or folder dropped on the MView window opens it, like a command line argument: its folder becomes the browsing root. Dropped on the settings editor, it starts the viewer with it. Several files: only the first counts. (TForm.AllowDropFiles / OnDropFiles in uMainForm.)
+
+## Open for next session
+
+- **Loading times got higher after the TIFF changes** (reported by the user, no numbers yet). Get the D line / timing.csv first. Suspects:
+  - Windows' file cache: the earlier 1712 ms may have been a file already in memory, a fresh read of 324 MB from disk is slower; compare a second opening of the same file.
+  - YieldToDisplay: a preload that promoted to display job keeps PriorityRead = False and may now wait at the gate behind the other display job (preview / screen of the same file), up to 5 s per band.
+  - uTiffQuick: 2 x 1125 separate seeks + 36 KB reads; on a hard disk the seeks can cost more than reading everything in order. Try one row per group, or read whole strips in order and skip rows in memory.
+  - The WIC quick view for JPEG (UseWICQuickView): compare with 0.
+- Spec update for Phase E once the measurements are in.
+
+## Measured after all fixes (timing.csv, 14:22-14:26) — better than it felt
+
+Uncompressed 108 MP TIFF (324 MB):
+| | before today | now |
+|---|---|---|
+| quick view decode | 2696 ms (1712 full, old reader) | 168-368 ms (row-skipping reader) |
+| screen copy / final resize | 344-680 ms | 24-120 ms |
+| full decode (WIC) | 1712 ms (old reader) | 1432-1480 ms |
+| next image from cache | - | 8-48 ms |
+
+LZW TIFF (55 MB): quick view decode 4.4-4.7 s, 9.2 s when two ran at once; from cache 24-48 ms. This is the slow case left (Hamana: just under 3 s). Suspect: WIC's TIFF codec decodes a 1024-row strip again for each band, or LZW through WIC is just slow. Next: time one CopyPixels of the whole image vs banded; else an own LZW + predictor decoder (sequential, could also average while decoding).

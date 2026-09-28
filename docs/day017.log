@@ -1,0 +1,56 @@
+# Day 17 — Closing Phase D: small fixes, gestures, settings editor
+
+Phase D is finished except for the TIFF test (pan at 1600 % on the largest microscopy TIFF), which waits for the archives in test\images\tiff.
+
+## Day 16 result
+
+Zooming now switches to the original pixels quickly (GPU mipmaps, 1024 tiles, middle first, sharpening tile by tile). Confirmed by the user: "it is fixed".
+
+## Changes
+
+**(a) Zoom wheel reversed.** In zoom mode (X1 / Z) the wheel towards you zooms in, away from you zooms out. (uInputHandler)
+
+**(b) WrapScope.** Was already there as `Folder | Tree`. MView.ini now writes `Dir`; `Folder` and `Directory` are still read. `WrapScope=Dir` with `WrapAround=1`: the last image of a folder is followed by the first image of the same folder; only the gestures and the Up / Down keys change folders. (uTypes)
+
+**(c) Rotation around the mouse:** postponed at the user's request. Rotation around the window centre stays; the mouse point is only useful for preparing crops (Phase G).
+
+**(d) Right-button gestures** (spec §9.2, as in Hamana):
+
+| Gesture (right button held, move, release) | Command |
+|---|---|
+| left | previous folder |
+| right | next folder |
+| down | exit |
+| up | not used yet (Hamana: parent folder) |
+
+The movement must be at least 40 px, and the main direction at least 1.5 times the other one; a diagonal stroke does nothing. A right click without movement still opens the context menu; after a gesture it doesn't (DoContextPopup in both surfaces asks TInputHandler.SuppressContextMenu).
+
+**(e) Settings editor.** MView started without a file or folder shows MView.ini in an editor (uIniEditor: SynEdit with ini highlighting) instead of the last session:
+- The help line at the bottom explains the key under the cursor (uConfig.ConfigKeyHelp); unknown keys are marked as kept but unused.
+- Buttons: View images (F5), Save (Ctrl+S), Undo changes, Exit. View images saves first, then starts the viewer with the last session. TMView is created only then, so it reads what was just saved.
+- Exit with unsaved changes needs a second press (no dialogs, spec §3.1).
+- Before it opens, the ini is completed with all keys MView knows (values, comments and unknown keys stay).
+- It is a page control: a graphical page (mouse quadrants, Phase F) can be added next to the text.
+- `[Startup] OpenLastSession` is no longer used.
+
+Project: new unit source\config\uIniEditor.pas; the SynEdit package (ships with Lazarus) is now required (MView.lpi).
+
+## To check
+
+- Build: close the Lazarus tabs without saving (or File > Reload) first. Lazarus may ask about the SynEdit package the first time.
+- Start without parameters (Run > Run Parameters empty): the editor appears. Move through the keys: the help line follows. View images: the last session opens in the viewer.
+- Right-drag left / right: folder changes. Right-drag down: exit. Right click: menu.
+- Zoom mode: wheel towards you zooms in.
+- WrapScope=Dir: stays in the folder at the end of a folder.
+
+## Open
+
+- TIFF test of Phase D (archives).
+- Rotation around the mouse (Phase G, cropping).
+- Gesture up = parent folder (Phase F).
+- A way back from the viewer to the settings (e.g. context menu), Phase F.
+
+## Added after testing ("it already feels better than Hamana")
+
+- **Balloon help in the settings editor:** pointing at a line shows its explanation as a hint (key on the first line, explanation below; stays 15 s). Same text as the help line, which follows the cursor.
+- **Text lines as overlays:** info line, diagnostics line and mode label are now white text with a thin dark outline straight over the image, no black boxes (GPU: the text texture drawn black in 8 one-pixel offsets plus a soft shadow, then white; CPU renderer the same with TextOut). The "no image" message stays on black.

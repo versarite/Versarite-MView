@@ -1,0 +1,60 @@
+# Day 12 — Phase C: preloading, quick view, cancellable JPEG
+
+## Why
+
+Phase B measurements: stepping to the next large JPEG (≈50 MP phone photos) took a few seconds; skipping ahead several images took much longer. Cause: the FPC JPEG reader (fpreadjpeg.pas, FPC 3.2.2) only reports progress at start and end — its progress hook is an empty "ToDo" stub — so an obsolete decode could not be stopped, and the wanted image waited behind it on the single worker. It also writes every pixel through Img.Colors[x, y], which is slow.
+
+## What changed
+
+**Own JPEG decoder** (`source\imaging\uJpegDecoder.pas`, new). Uses the same pasjpeg library directly:
+- rows go straight into the BGRA bitmap (no per-pixel virtual call);
+- cancel is checked every 16 rows and in the library's progress hook (which also runs while a progressive JPEG is read in);
+- decodes at 1/2, 1/4 or 1/8 size inside the library (DCT scaling) — just large enough for the screen. This is the "Screen" quality (spec §7.1), several times faster than a full decode.
+
+**Two quality levels.** The current image is first decoded at Screen quality (quick view), then at Full quality in the background. When Full arrives it replaces the quick view without resetting zoom, pan or rotation. The renderer does all geometry in original pixels, so 100 % means 100 % even during the quick view (just blurrier). Non-JPEG formats and JPEGs not larger than the screen are always decoded in full.
+
+**Preloading (wanted set, spec §5.3).** After every step and every delivery, TMView tells the scheduler what should exist:
+- current image, Screen quality (P0) if nothing is cached;
+- current image, Full quality (P1) once Screen is there;
+- PreloadCount images ahead in the direction of travel (P2) and PreloadBehind behind (P3), at Screen quality — across folder boundaries, following the same rules as next/previous (TNavigator.FilesAhead).
+Jobs not in the set are dropped or cancelled; running jobs still wanted are promoted, not restarted.
+
+**Several decode threads, one kept free.** DecodeThreads (0 = cores − 1, 1..4). A background job only starts if another worker stays idle, so the image you ask for never waits behind a preload.
+
+**Cache.** Up to one entry per file and quality. Eviction by distance from the current image: files outside the preload window first, big Full versions before small Screen versions; the current image is never evicted. Only as many neighbours are preloaded as fit next to the current image, so preloads can't push each other out in a loop. CacheSizeMB = 0 means automatic: 25 % of RAM, 256..4096 MB.
+
+**I/O gate** (`source\utility\uIOGate.pas`, new, spec §5.5): while a display job reads its file, the directory scanner waits between folders.
+
+**Diagnostics line (D)** now shows the quality shown (screen / full), the original size, cache use against its budget, and "jobs N waiting, N of N workers busy". timing.csv has a new last column `quality` — delete an old timing.csv so the header matches.
+
+## Settings ([Performance] in MView.ini)
+
+- `CacheSizeMB=0` — automatic. An existing MView.ini still says 256 (or what you set); change it to 0 or a larger number.
+- `DecodeThreads=0` — automatic.
+- `PreloadCount=5` — images ahead.
+- `PreloadBehind=2` — images behind.
+
+## Tests
+
+TestNavigation: 75 checks (new: FilesAhead — across folders, wrap, no wrap, wrap per folder, tree not yet known, and asking doesn't move).
+
+## Worth measuring
+
+- Step through the large JPEGs slowly: after the first image, each next image should say "screen from cache" and appear at once, then switch to "full".
+- Hold → : the quick views should keep up far better than before; releasing the key shows the last image quickly.
+- Zoom in right after landing on an image: blurry for a moment, sharp when Full arrives, view unchanged.
+
+## Not yet
+
+- A faster decoder for Full quality (WIC) if the timing log shows Full is still too slow.
+- TIFF quick view (TIFFs are always decoded in full for now).
+
+## EXIF orientation (added the same evening)
+
+Phone and camera JPEGs are now shown upright. New unit `source\imaging\uExifOrientation.pas` reads the orientation tag (0x0112) from the EXIF block, checking every offset against the data size, so broken files just count as "upright". The loader turns the decoded bitmap on the worker (flip / RotateCW / RotateCCW), at both quality levels and before the screen copy is made; FullWidth/FullHeight are the upright size, and the quick-view scale is chosen for the upright size too. R / L rotation works on top of it as before.
+
+Setting: `[View] AutoRotate=1` (0 = show the pixels as stored).
+
+Tests: new `test\TestExif.lpr` (built and run by build_test.bat after TestNavigation): headers built in memory — both byte orders, all 8 values, tag not first, after a JFIF segment, missing tag, invalid value, wrong type, cut-off data, bad IFD offset, not a JPEG — plus the eight pictures in `test\images\exif`. Expected: 20 passed.
+
+Test pictures: `test\images\exif\orient_1.jpg` … `orient_8.jpg` are stored mirrored/turned in all eight ways, each tagged so that a correct viewer shows every one the same: red "TL" square top left, yellow arrow pointing up, "UPRIGHT". (Checked against Pillow's exif_transpose.)

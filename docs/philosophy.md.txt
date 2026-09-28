@@ -1,0 +1,4 @@
+Every feature must improve the workflow.
+Every module should be easy to understand.
+Every design decision should be documented.
+The source code should teach as well as implement.

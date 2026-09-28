@@ -1,0 +1,247 @@
+Microscopy Image Viewer – Design Notes
+
+Project Vision
+
+Create a native Lazarus/Free Pascal image viewer optimized for rapid
+inspection and sorting of scientific microscopy images and short GIF
+movies.
+
+The emphasis is on: - Extremely fast image browsing. - Minimal UI. -
+Mouse-driven workflow. - Recursive directory navigation. - Efficient
+sorting of images into predefined folders.
+
+This is not intended to be a photo management application.
+
+------------------------------------------------------------------------
+
+Core Priorities
+
+1.  Fast image loading and preloading.
+2.  Recursive directory navigation.
+3.  Wrap-around navigation at the end of image and directory lists.
+4.  Mouse gesture control with screen quadrants.
+5.  Thumbnail cache (no image database).
+6.  Later: edge-of-screen move/copy menu.
+
+------------------------------------------------------------------------
+
+Supported Formats
+
+-   TIFF (highest priority)
+-   JPEG
+-   PNG
+-   GIF (including animation where practical)
+-   BMP
+
+------------------------------------------------------------------------
+
+Development Roadmap
+
+Milestone 1 – Rendering Engine
+
+Goal: Display a single image as quickly as possible.
+
+Project modules:
+
+-   uMain
+-   uRenderer
+-   uImageLoader
+
+Functions:
+
+-   Load image from filename.
+-   Fit-to-window.
+-   Original size.
+-   Fullscreen.
+-   ESC exits.
+
+No menus. No toolbars. No dialogs.
+
+------------------------------------------------------------------------
+
+Milestone 2 – Navigator
+
+Create a dedicated navigation class.
+
+TNavigator responsibilities:
+
+-   CurrentDirectory
+-   CurrentImage
+-   NextImage()
+-   PreviousImage()
+-   NextDirectory()
+-   PreviousDirectory()
+
+The renderer must never access the filesystem directly.
+
+Instead:
+
+Navigator → filename → Renderer
+
+------------------------------------------------------------------------
+
+Milestone 3 – Recursive Scanner
+
+Scan the directory tree once.
+
+Example:
+
+Root Experiment1 images… Experiment2 images… Experiment3 images…
+
+Internally maintain:
+
+DirectoryList Directory 0 Directory 1 Directory 2
+
+Each directory owns an ImageList.
+
+Navigation becomes simple index manipulation.
+
+------------------------------------------------------------------------
+
+Milestone 4 – Wrap-around Navigation
+
+Always wrap.
+
+Image navigation:
+
+Last Image ↓ Next ↓ First Image
+
+Directory navigation behaves identically.
+
+There are no dead ends.
+
+------------------------------------------------------------------------
+
+Milestone 5 – Preloader
+
+Implement a background preload thread.
+
+Responsibilities:
+
+-   Ask Navigator for upcoming images.
+-   Decode images.
+-   Store decoded bitmaps in RAM.
+
+When NextImage is requested, the image is already decoded.
+
+------------------------------------------------------------------------
+
+Milestone 6 – Mouse Engine
+
+Create a separate subsystem:
+
+TMouseEngine
+
+Its only job is converting mouse activity into commands.
+
+Examples:
+
+WheelUp → NextImage
+
+GestureLeft → PreviousDirectory
+
+GestureDown → Exit
+
+The viewer receives only commands.
+
+------------------------------------------------------------------------
+
+Milestone 7 – Screen Quadrants
+
+Divide the display into four quadrants.
+
+Each quadrant has independent mappings.
+
+Example:
+
+Quadrant 1 WheelUp = ZoomIn WheelDown = ZoomOut
+
+Quadrant 2 WheelUp = NextImage WheelDown = PreviousImage
+
+Quadrant 3 GestureLeft = PreviousDirectory
+
+Quadrant 4 GestureRight = NextDirectory
+
+------------------------------------------------------------------------
+
+Milestone 8 – Configuration
+
+Initially use an INI file.
+
+Example:
+
+[Quadrant1] WheelUp=ZoomIn WheelDown=ZoomOut GestureDown=Exit
+
+Later replace this with a lightweight scripting language.
+
+------------------------------------------------------------------------
+
+Milestone 9 – Sorting
+
+After the navigation engine is stable.
+
+Functions:
+
+MoveToGood() MoveToBad() MoveToInteresting()
+
+Future enhancement:
+
+When the cursor touches a screen edge, display a popup containing
+predefined destination folders.
+
+One click should move or copy the image.
+
+------------------------------------------------------------------------
+
+Architecture
+
+The application should be divided into four independent components.
+
+TNavigator Maintains directory and image lists.
+
+TRenderer Displays images.
+
+TPreloader Predictively decodes upcoming images.
+
+TMouseEngine Converts gestures and wheel events into commands.
+
+The MainForm should only dispatch commands.
+
+------------------------------------------------------------------------
+
+Design Philosophy
+
+Everything should become a command.
+
+Examples:
+
+-   NextImage
+-   PreviousImage
+-   NextDirectory
+-   PreviousDirectory
+-   ZoomIn
+-   ZoomOut
+-   FitToScreen
+-   OriginalSize
+-   Exit
+
+Commands may originate from:
+
+-   Mouse wheel
+-   Mouse gestures
+-   Keyboard (minimal support)
+-   Future scripting language
+
+The rest of the application should not care where the command
+originated.
+
+------------------------------------------------------------------------
+
+Long-Term Goal
+
+Build an ultra-fast native image viewer dedicated to scientific
+microscopy workflows.
+
+Every design decision should reinforce one objective:
+
+Minimize the time between “interesting image” and “next image.”

@@ -1,0 +1,232 @@
+# Day 007 – Performance Architecture Roadmap
+
+## Theme
+
+Today's work focused on the long-term performance architecture of MView. Rather than optimizing individual components, we established an implementation roadmap that allows advanced features such as preloading, cancellation, predictive loading, and progressive rendering to be added incrementally without requiring major redesigns.
+
+The guiding principle became:
+
+> Optimize for perceived responsiveness rather than raw decoding speed.
+
+The application should always remain responsive and provide immediate visual feedback to navigation.
+
+## Performance Philosophy
+
+Priority order:
+
+1. Immediate response to user navigation.
+2. Smooth, fluid browsing.
+3. High image quality.
+4. Background work (preloading and directory scanning).
+
+Rules:
+
+- Never block the UI thread.
+- Cancel obsolete work immediately.
+- Prefer showing a useful image quickly over waiting for the best image.
+- Background work must always yield to interactive work.
+
+## Rendering Pipeline
+
+```
+MediaLoader
+      │
+      ▼
+ ImageCache
+      │
+      ▼
+ Renderer
+      │
+      ▼
+ TMediaView.Paint()
+```
+
+The renderer paints only the best image currently available. It never performs loading or decoding.
+
+Decoded images are immutable. Worker threads never modify images currently being displayed; instead, completed images replace previous versions atomically.
+
+## Image Quality Levels
+
+Images will eventually progress through several quality levels:
+
+```
+Unknown
+   ↓
+Preview
+   ↓
+Screen Resolution
+   ↓
+Full Resolution
+```
+
+The renderer is unaware of the quality level and simply displays the newest available version.
+
+## Browse vs. Skim Modes
+
+### Browse Mode
+
+- Highest image quality
+- Aggressive preloading
+- Background refinement
+
+### Skim Mode
+
+- Lowest latency
+- Cancel obsolete work
+- Disable preloading
+- Display preview or screen-resolution images only
+
+The scheduler—not the renderer or loader—determines the current mode.
+
+## Job-Based Architecture
+
+The application is designed around jobs rather than threads.
+
+Jobs include:
+
+- Load current image
+- Preload neighbouring images
+- Scan directories
+
+Priority order:
+
+```
+HIGH
+Current image
+
+MEDIUM
+Preloading
+
+LOW
+Directory scanning
+```
+
+Initially a single worker thread is sufficient.
+
+## Cancellation
+
+Cancellation is a first-class architectural feature.
+
+Every long-running operation periodically checks whether it has become obsolete.
+
+Examples:
+
+- image decoding
+- RAW processing
+- TIFF decoding
+- directory scanning
+- preloading
+
+Fast navigation should immediately abandon obsolete work.
+
+## Image Cache
+
+The ImageCache owns immutable decoded images.
+
+Responsibilities:
+
+- own decoded images
+- replace lower-quality versions with higher-quality versions
+- support both interactive loading and preloading
+
+The renderer never owns decoded images.
+
+## Architecture
+
+```
+TMView
+    │
+    ├── TJobScheduler
+    ├── TMediaLoader
+    ├── TImageCache
+    ├── TRenderer
+    ├── TNavigator
+    └── TDirectoryScanner
+```
+
+Responsibilities:
+
+### TJobScheduler
+
+- decides what work happens next
+- manages priorities
+- handles cancellation
+- switches between Browse and Skim modes
+
+### TMediaLoader
+
+- decodes images
+- loads the requested quality
+- performs no scheduling decisions
+
+### TImageCache
+
+- owns immutable decoded images
+- manages image replacement
+
+### TRenderer
+
+- paints the current image
+
+## Implementation Roadmap
+
+### Phase 1
+
+Basic synchronous viewer.
+
+### Phase 2
+
+Introduce ImageCache.
+
+### Phase 3
+
+Move image loading to a background worker.
+
+### Phase 4
+
+Introduce JobScheduler.
+
+### Phase 5
+
+Implement cancellation.
+
+### Phase 6
+
+Implement background directory scanning.
+
+### Phase 7
+
+Implement preloading.
+
+### Phase 8
+
+Implement a sliding cache window.
+
+### Phase 9
+
+Implement Browse and Skim modes.
+
+### Phase 10
+
+Introduce multiple image quality levels.
+
+### Phase 11
+
+Implement predictive preloading.
+
+### Phase 12
+
+Implement progressive refinement.
+
+## Key Insight
+
+Each new performance feature should modify only a single subsystem.
+
+For example:
+
+- prediction changes only the scheduler
+- progressive rendering changes only the loader
+- preloading changes only scheduler policy
+- renderer remains essentially unchanged
+
+This keeps the architecture stable while allowing sophisticated performance optimizations to be added incrementally.
