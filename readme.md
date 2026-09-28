@@ -3,14 +3,17 @@
 
 A native Windows image viewer for scientific microscopy, driven by the mouse.
 By [Versarite](https://github.com/versarite). Free software under the GNU GPL v3.
+Pascal/Lazarus is underappreciated. It is powerful and beautiful at the same time, but 
+not documented well enough. Claude and ChatGPT helped me greatly to unlock the capabilities.
 
 **Status: pre-release (v0.19.0-alpha).** It is used daily, but things may still change.
 
-> **Dedicated to Hamana** by Makito Miyano (last version 1.48, 2006), the viewer that showed how browsing
-> images should feel: **fast first, mouse first, never in the way.**
+> **Dedicated to Hamana** - written by Makito Miyano (last version 1.48, 2006), 
+> the viewer that showed how browsing images should feel: 
+> **fast first, mouse first, never in the way.**
 > Hamana drew its images on the graphics card when few viewers did, read the next image
-> before you asked for it, and let you drive it with the mouse. Its development stopped in
-> 2006 and its source was never published, so its bugs could never be fixed. MView carries its
+> before you asked for it, and let you drive *everything* with the mouse. Its development stopped in
+> 2006 and its source was never published, so its bugs could never be fixed. Versarite MView carries its
 > ideas forward in code anyone can read, fix and extend.
 > See [From Hamana to MView](docs/From_Hamana_to_MView.md).
 
