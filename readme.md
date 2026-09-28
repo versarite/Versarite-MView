@@ -1,5 +1,5 @@
 # Versarite MView Pre-release
-# Written with support from Claude/Opus5.5 and ChatGPT
+## Written with support from Claude/Opus5.5 and ChatGPT
 
 A native Windows image viewer for scientific microscopy, driven by the mouse.
 By [Versarite](https://github.com/versarite). Free software under the GNU GPL v3.
