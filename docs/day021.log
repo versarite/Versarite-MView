@@ -1,0 +1,248 @@
+MView Day 21 (2026-09-29)
+=========================
+
+Phase G, G1: sorting into folders, first stage (user)
+-----------------------------------------------------
+Plan: docs\Strategy_Phase_G.md (v5). Spec §9.6, §9.7, §14, §15.
+
+"the panel should open when the mouse is 1 second at the right edge.
+ the sort panel should have a pin option, but by default close after
+ each image." / "left click should copy, right click should move" /
+ "drag and drop dir from totalcmd ... should then target the pinned
+ side panel" / "a main deleted_files folder defined in ini, where all
+ deleted files are moved. Delete current image should be an item in
+ the right click context menu."
+
+Built:
+- uSortPanel (new, rendering): the panel, drawn by MView into a
+  BGRABitmap; both renderers show it on top (TRenderer.SetPanel, a
+  version number for the GPU upload). Elastic: window height, about
+  160 px wide (DPI scaled), buttons 36..20 px high, as many as fit, the
+  wheel scrolls the rest. Pin, "+ add folder", a "..." corner per
+  button, a bottom line (hovered folder / last action, click = undo).
+  Opens after EdgeDelayMs (1 s) at the right edge with no button down;
+  unpinned it closes 0.6 s after the mouse left it (also out of the
+  window or on focus loss) and after every copy / move. Opened by the
+  menu or the SortPanel command it stays until the mouse has been on
+  it. Esc closes it first.
+- Overlay mouse hook (uCommands TOverlayMouseEvent; TMediaView and
+  TGLMediaView): every mouse event goes to the panel first; what lands
+  on the open panel doesn't reach the mouse engine. Buttons act on
+  release. Left = copy, right = move; a left double click copies once,
+  fast right clicks all count. Tilting over the panel does nothing.
+- uFileMover (new, utility): one worker thread, jobs in order;
+  CopyFileW / MoveFileExW (MOVEFILE_COPY_ALLOWED); never overwrites
+  (_1, _2 ...); a file in use is retried 2 s; a move to another drive
+  whose original stays (in use) is reported and counted as a copy;
+  sorting.log next to MView.exe (time;action;from;to;result).
+- uSortFolders (new, config): the slots (folder, name, colour, icon),
+  8 recent folders, [Sort] in MView.ini (one key per value, stale keys
+  removed). uConfig: EdgeDelayMs, Pinned, DeletedFolder, IconFolder,
+  TotalCommander; SaveSort writes only [Sort].
+- TMView: SortCurrent, DeleteCurrent (into [Sort] DeletedFolder,
+  default Documents\MView deleted files), UndoLast (a copy goes into the
+  deleted-files folder, a moved / deleted file back home; up to 50),
+  HandleFileJobDone. A moved image leaves the lists at once and the
+  next one shows; back if the move fails. A copy / move into a browsed
+  folder shows up there. Undo is refused while a job is under way.
+- TNavigator: RemoveFile, AddFile, SelectFile; changes made while the
+  tree is still being scanned are applied to it when it arrives.
+  TDirectoryImages: Delete, AddFile. TImageCache: DropFile.
+- Main form: menu "Sort into folders ...", "Delete current image",
+  "Undo ..." (named, only when there is something); the slot menu
+  (Choose folder ... with a smart start folder, Recent folders, This
+  image's folder, Its parent folder, Colour, Move up / down, Remove);
+  "+" gives the same choices, each adding a button. Folders dropped on
+  the open panel: onto a button the first replaces it, the rest are
+  added; elsewhere on the panel all are added. Exit waits for a running
+  copy (watchdog deadline 2 min instead of 4 s then).
+- Mouse profile commands SortPanel, DeleteImage, Undo (not bound by
+  default).
+- Tests: TestSort.lpr (new, in build_test.bat): UniqueFileName, copy /
+  move / missing source / missing folder / folder made / undo, the log,
+  the mover thread, TSortFolders and the [Sort] round trip.
+  TestNavigation: TestRemoveAndAdd.
+
+Review (independent, two rounds) found and fixed: a copy's result could
+end a queued move of the same file (jobs now have numbers); Undo during
+a running job took back an older one; a cross-drive move with the
+original in use counted as moved; an unpinned panel stayed open when
+the mouse left the window over it; moves before the tree arrived came
+back with the tree; exit could cut a large copy off; folder names cut
+inside a UTF-8 character; "&" in folder names in menus; the scroll hint
+overlapping a button; a test expectation (the root of the opened file).
+
+Not compiled here (no Free Pascal in this workspace): first build is in
+Lazarus.
+
+Next stage: icons (icon folder, by name, drop, "Make icon from this
+image"), side by side with Total Commander, settings page, greyed
+buttons for missing folders.
+
+New units: uSortFolders (config), uFileMover (utility), uSortPanel
+(rendering). Changed: uMView, umainform, uConfig, uCommands,
+uNavigator, uDirectoryImages, uImageCache, uRenderer, uGLRenderer,
+uMediaView, uGLMediaView, uMouseProfile, uMouseEngine. Tests:
+TestSort.lpr (new), TestNavigation.lpr, build_test.bat.
+
+Confirmation flash (user, after the first build: "compiled ok. what
+would be needed is some kind of visual confirmation that copy/move was
+performed. perhaps a flash in the folder icon color")
+-------------------------------------------------------------------
+- uSortPanel: JobStarted / JobDone / Flash / CloseAfterAction. A button
+  with a job under way gets a frame in its colour; when the job is done
+  (not at the click: the real confirmation) it lights up in its colour
+  with a check mark and fades over 0.9 s (full for 0.2 s); red with a
+  cross if it failed or was refused ("already in Good", a pasted image).
+  Delete and undo: the bottom line flashes (neutral grey, or red).
+- Unpinned, the panel now stays open until the flash is over (at most
+  3 s for a slow copy), then closes. A result that arrives while the
+  panel is closed (Delete from the menu, a slow copy) flashes an 8 px
+  strip at the right edge in the same colour.
+- Animated from TMView.PumpDeliveries (50 ms timer, 20 steps/s); the
+  GPU renderer uploads only while it changes.
+Units changed: uSortPanel, uMView. Spec §9.7.
+
+Opening at the edge (user: "the region where the menu responds has to be
+a little wider, or it is super hard to position the mouse ... when the
+program is NOT in full screen" / "reduce the time for opening the side
+menu to 0.5s. best is to have this time constant in the ini")
+-------------------------------------------------------------------
+- [Sort] EdgeWidth (new, default 12 px at 96 dpi, scaled; 2..60): how
+  close to the right edge the mouse must rest (was a fixed 4 px).
+- [Sort] EdgeDelayMs: default now 500 (was 1000). An MView.ini written
+  since this morning holds EdgeDelayMs=1000: change it there (settings
+  screen) or delete the line.
+- The menu entry is now called "Sort panel (side menu)" (it was "Sort
+  into folders ...").
+Units changed: uConfig, uSortPanel, uMView, umainform. Spec §9.6, §9.7, §14.
+
+Stage 2: icons (user: "we can proceed to the icon part")
+-------------------------------------------------------------------
+- uIconFile (new, utility, plain FPC): .ico directory, the picture for
+  a size (smallest at least that large), old-style pictures (1/4/8/24/32
+  bit, AND mask) decoded, an .ico written from PNG pictures.
+- uSortIcons (new, rendering): the icon folder, extra icon files and the
+  sort folders are read / checked on a loader thread (when the panel
+  opens, after a slot change, after an icon is made); pictures made on
+  the window thread from the bytes, scaled per size, kept. A loader
+  stuck on a dead network drive is left alone at shutdown.
+- Panel: the icon instead of the coloured folder, number in a corner;
+  missing folders grey ("folder not found").
+- Slot icon: Slot<n>Icon (name in the icon folder or full path, "-" =
+  none); by name otherwise (Good.ico / Good.png for ...\Good). Drop an
+  .ico / .png on a button; "..." menu -> Icon.
+- "Make icon from this image": selection or middle of the screen,
+  square, 16..256 px PNG entries, named after the image's folder, into
+  the icon folder via the mover (faWrite: the old one becomes
+  <name>_previous.ico, never overwritten).
+
+Three changes (user, after testing)
+-----------------------------------
+(a) "when the ini editor is open, it should be possible to drag and drop
+    an image or paste from clipboard and open it instantly"
+    - Ctrl+V with an image (no text) on the settings screen starts the
+      viewer with it (TMView.StartWithPaste: the last session opens
+      behind it and does not replace it).
+    - Drops were only taken by the form's own window: the editor's
+      windows (the text) now take them too (DragAcceptFiles on each;
+      LCL hands them to the form's OnDropFiles).
+(b) "after editing/cropping an image it is not saved yet ... using the
+    side menu to copy/move the image, it should be saved to the selected
+    folder instead"
+    - A pasted / cropped image is saved as PNG into the slot's folder
+      (save thread, never overwriting, folder must exist). Left: it
+      stays; right: the file comes back at once (and the image returns
+      if the save fails). Undo: into the deleted-files folder.
+(c) "we have currently no way to switch into the side panel folders.
+    maybe a mouse swipe right over the entry?"
+    - Swipe right over a button (>= 40 px), wheel click on it, or "Open
+      this folder" in its menu: that folder opens for browsing.
+
+Review (independent) found and fixed: two locals named like form
+properties (Name, Tag: would not have compiled); an icon load delivered
+while leaving the viewer could reach the freed view; a pasted image kept
+over a folder opened later; Undo during a pasted image's save; X1/X2
+counted as wheel click; a leak for an icon file listed twice; an icon
+renamed to _previous but the new one not written.
+
+New units: uIconFile (utility), uSortIcons (rendering). Changed: uMView,
+umainform, uSortPanel, uFileMover, uSortFolders, uImageSaver, uCommands,
+uMediaView, uGLMediaView. Tests: TestSort (write jobs, icon files).
+
+Double click to sort (user: "single click to copy/move is too erratic.
+please change to double clicks for both ... otherwise many unnecessary
+moves/copies are happening")
+-------------------------------------------------------------------
+- Copy = double-click left, move = double-click right on a button. A
+  single click only says so in the panel's bottom line. Timing by MView
+  (TMView.SecondSlotClick: same button, same mouse button, within the
+  Windows double-click time, at most 6 px apart), not by LCL's ssDouble.
+- Pin, "+", "...", bottom line (undo) stay single clicks; wheel click and
+  swipe right open the folder as before.
+- Hover text: "double-click  left: copy  right: move".
+Clock (user): Windows had synchronised to a wrong time server; build
+files dated ~20 min ahead made Lazarus skip changed units. Fixed by the
+user; one "Clean up and Build" needed.
+Units changed: uMView, uSortPanel. Spec §9.7.
+
+Design notes (user): next stages G6 magnifier and G4 filters
+-------------------------------------------------------------------
+Recorded in docs\Strategy_Phase_G.md (v7) with the user's decisions:
+round lens; magnification relative to the screen; the mouse moves it,
+left drag horizontal = magnification, vertical = size; the wheel cycles
+sharpening off / low / high (off by default); wheel click locks /
+unlocks the lens (for measuring). Filters: gamma, brightness, contrast,
+dynamic range, saturation, hue, inversion; "Lock filters" toggle in the
+right-click menu; the filter panel opens at the left edge, with a pin in
+MView.ini. Order: side by side with Total Commander, then G6, then G4.
+
+Side by side with Total Commander (user: "the totalcmd next")
+-------------------------------------------------------------------
+- uTotalCommander (new, utility): finds the window (class TTOTAL_CMD)
+  and the program ([Sort] TotalCommander, the running process, the
+  registry InstallDir, usual folders), starts / tells it
+  "/O /S /L=<folder>", places windows with the invisible borders of
+  Windows 10 / 11 corrected (DwmGetWindowAttribute).
+- Main form: menu "Side by side with Total Commander" (ticked while on),
+  command SideBySide: MView left half of the work area, Total Commander
+  right half in the image's folder; placed when its window appears if
+  just started (up to 60 s), placed again after 0.6 s if it was running.
+  Again / fullscreen / Esc: back to the place before (also what MView.ini
+  keeps as the window place meanwhile).
+- Review (independent) found and fixed: a running Total Commander could
+  bring itself up after being placed; fullscreen during side by side
+  kept the half as its place; a failed start left MView in the half; the
+  settings screen kept the half; the registry's 32-bit view.
+Units changed: umainform, uCommands, uMouseProfile, uMouseEngine, uMView;
+new uTotalCommander. Spec §9.6, §9.7.
+
+End of day (user)
+-----------------
+- The build with side by side compiled on the first try.
+- "animated_noloop.gif ... gave an exception": the debugger stopping on
+  EGifCancelled, which the GIF decoder raises on purpose when a decode
+  is no longer wanted (the next image was chosen) and umedialoader
+  catches (EJpegCancelled likewise). Not an error; MView.exe on its own
+  shows nothing. The user runs without the debugger (Shift+Ctrl+F9);
+  alternatively Tools > Options > Debugger > Language Exceptions:
+  ignore EGifCancelled and EJpegCancelled.
+
+State at the end of Day 21
+- G1 (sorting panel) complete: panel, copy / move (double-click), delete,
+  undo, log, flash, icons, "Make icon", swipe into a folder, sorting of
+  pasted / cropped images, side by side with Total Commander. Paste and
+  drop on the settings screen.
+- Planned and decided (docs\Strategy_Phase_G.md v7): G6 magnifier, then
+  G4 filters. G2 / G3 wait for the new microscope's files.
+- Not yet done: a settings page for the sort folders; tests for the
+  panel's hit test and layout (they need BGRABitmap: TestGif-style
+  lazbuild project).
+
+Next session
+- The user prepares the GitHub copy; check it for completeness before
+  the commit: every unit of the project (new today: uSortFolders,
+  uFileMover, uSortPanel, uSortIcons, uIconFile, uTotalCommander),
+  tests and build_test.bat, .gitignore (build output, MView.ini,
+  sorting.log, timing.csv / startup.csv, private test images), release
+  notes for the new version.

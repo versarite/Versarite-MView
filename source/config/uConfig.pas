@@ -69,7 +69,8 @@ uses
   SysUtils,
   Graphics,
   IniFiles,
-  uTypes;
+  uTypes,
+  uSortFolders;
 
 type
 
@@ -149,12 +150,24 @@ type
 
     FIniFileName     : string;
 
+    { Sort (Phase G) }
+
+    FSortFolders     : TSortFolders;
+    FSortEdgeDelayMs : Integer;
+    FSortEdgeWidth   : Integer;
+    FSortPinned      : Boolean;
+    FDeletedFolder   : string;
+    FIconFolder      : string;
+    FTotalCommander  : string;
+
     procedure LoadDefaults;
+    procedure WriteSort(AIni: TCustomIniFile);
     procedure Validate;
 
   public
 
     constructor Create;
+    destructor Destroy; override;
 
     procedure Load;
     procedure Save;
@@ -272,11 +285,44 @@ type
       has a folder of its own. }
     function MouseProfileFileName: string;
 
+    { Sort (Phase G, [Sort]) }
+
+    { The sort panel's folders (slots, recent folders). Changed by the
+      viewer; SaveSort writes them. }
+    property SortFolders     : TSortFolders read FSortFolders;
+    { ms the mouse rests at the right edge until the sort panel opens;
+      0 = never (the menu and the SortPanel command still open it). }
+    property SortEdgeDelayMs : Integer read FSortEdgeDelayMs;
+    { How close to the right edge the mouse must rest, in pixels at 96
+      dpi (scaled for the screen). A window's edge is hard to hit
+      exactly (user, Day 21): 12 by default. }
+    property SortEdgeWidth   : Integer read FSortEdgeWidth;
+    { The panel's pin: stays open after a copy / move. }
+    property SortPinned      : Boolean read FSortPinned write FSortPinned;
+    { Where "Delete" moves files. '' = <Documents>\MView deleted files. }
+    property DeletedFolder   : string read FDeletedFolder;
+    { Where the slot icons are. '' = the icons folder next to MView.exe. }
+    property IconFolder      : string read FIconFolder;
+    { TOTALCMD64.EXE for "side by side"; '' = find it (registry). }
+    property TotalCommander  : string read FTotalCommander;
+
+    { The folder "Delete" moves to, without trailing delimiter. }
+    function DeletedFilesFolder: string;
+    { The icon folder, with trailing delimiter. }
+    function IconFilesFolder: string;
+    { Writes only the [Sort] section (slots, recent folders, pin); other
+      keys, and unsaved text in the settings editor, stay as they are. }
+    procedure SaveSort;
+
   end;
 
 { One line of help for a key, for the settings editor. '' if the key
   is unknown. ASection without brackets. }
 function ConfigKeyHelp(const ASection, AKey: string): string;
+
+{ The user's Documents folder, with a trailing delimiter (also when it
+  was moved). The fallback when the save folder can't be used. }
+function UserDocumentsDirectory: string;
 
 implementation
 
@@ -334,11 +380,26 @@ const
   KEY_TIMING_LOG        = 'TimingLog';
   KEY_SAVE_IMAGE_DIR    = 'SaveImageDirectory';
 
+const
+  KEY_SORT_EDGE_DELAY   = 'EdgeDelayMs';
+  KEY_SORT_EDGE_WIDTH   = 'EdgeWidth';
+  KEY_SORT_PINNED       = 'Pinned';
+  KEY_DELETED_FOLDER    = 'DeletedFolder';
+  KEY_ICON_FOLDER       = 'IconFolder';
+  KEY_TOTAL_COMMANDER   = 'TotalCommander';
+
 constructor TConfig.Create;
 begin
   inherited Create;
   FIniFileName := ExtractFilePath(ParamStr(0)) + CONFIG_FILE;
+  FSortFolders := TSortFolders.Create;
   LoadDefaults;
+end;
+
+destructor TConfig.Destroy;
+begin
+  FSortFolders.Free;
+  inherited Destroy;
 end;
 
 procedure TConfig.LoadDefaults;
@@ -393,6 +454,15 @@ begin
   FTimingLog       := False;
   { Not chosen: the Documents folder at the first save (SaveDirectory). }
   FSaveImageDir    := '';
+
+  FSortEdgeDelayMs := 500;     { user, Day 21: 0.5 s }
+  FSortEdgeWidth   := 12;
+  FSortPinned      := False;
+  FDeletedFolder   := '';
+  FIconFolder      := '';
+  FTotalCommander  := '';
+  { The slots are not defaults: an empty list. }
+  FSortFolders.Clear;
 end;
 
 procedure TConfig.Load;
@@ -456,6 +526,14 @@ begin
     FShowDiagnostics := Ini.ReadBool(SEC_DEBUG, KEY_SHOW_FPS, FShowDiagnostics);
     FTimingLog       := Ini.ReadBool(SEC_DEBUG, KEY_TIMING_LOG, FTimingLog);
     FSaveImageDir    := Ini.ReadString(SEC_DEBUG, KEY_SAVE_IMAGE_DIR, FSaveImageDir);
+
+    FSortEdgeDelayMs := Ini.ReadInteger(SortSection, KEY_SORT_EDGE_DELAY, FSortEdgeDelayMs);
+    FSortEdgeWidth   := Ini.ReadInteger(SortSection, KEY_SORT_EDGE_WIDTH, FSortEdgeWidth);
+    FSortPinned      := Ini.ReadBool(SortSection, KEY_SORT_PINNED, FSortPinned);
+    FDeletedFolder   := Trim(Ini.ReadString(SortSection, KEY_DELETED_FOLDER, FDeletedFolder));
+    FIconFolder      := Trim(Ini.ReadString(SortSection, KEY_ICON_FOLDER, FIconFolder));
+    FTotalCommander  := Trim(Ini.ReadString(SortSection, KEY_TOTAL_COMMANDER, FTotalCommander));
+    FSortFolders.LoadFromIni(Ini);
   finally
     Ini.Free;
   end;
@@ -518,9 +596,54 @@ begin
     Ini.WriteBool(SEC_DEBUG, KEY_SHOW_FPS, FShowDiagnostics);
     Ini.WriteBool(SEC_DEBUG, KEY_TIMING_LOG, FTimingLog);
     Ini.WriteString(SEC_DEBUG, KEY_SAVE_IMAGE_DIR, FSaveImageDir);
+
+    WriteSort(Ini);
   finally
     Ini.Free;
   end;
+end;
+
+procedure TConfig.WriteSort(AIni: TCustomIniFile);
+begin
+  AIni.WriteInteger(SortSection, KEY_SORT_EDGE_DELAY, FSortEdgeDelayMs);
+  AIni.WriteInteger(SortSection, KEY_SORT_EDGE_WIDTH, FSortEdgeWidth);
+  AIni.WriteBool(SortSection, KEY_SORT_PINNED, FSortPinned);
+  AIni.WriteString(SortSection, KEY_DELETED_FOLDER, FDeletedFolder);
+  AIni.WriteString(SortSection, KEY_ICON_FOLDER, FIconFolder);
+  AIni.WriteString(SortSection, KEY_TOTAL_COMMANDER, FTotalCommander);
+  FSortFolders.SaveToIni(AIni);
+end;
+
+procedure TConfig.SaveSort;
+var
+  Ini: TIniFile;
+begin
+  try
+    Ini := TIniFile.Create(FIniFileName);
+    try
+      WriteSort(Ini);
+    finally
+      Ini.Free;
+    end;
+  except
+    { A read-only folder: the slots hold for this session only. }
+  end;
+end;
+
+function TConfig.DeletedFilesFolder: string;
+begin
+  if FDeletedFolder <> '' then
+    Result := ExcludeTrailingPathDelimiter(FDeletedFolder)
+  else
+    Result := UserDocumentsDirectory + 'MView deleted files';
+end;
+
+function TConfig.IconFilesFolder: string;
+begin
+  if FIconFolder <> '' then
+    Result := IncludeTrailingPathDelimiter(FIconFolder)
+  else
+    Result := ExtractFilePath(ParamStr(0)) + 'icons' + PathDelim;
 end;
 
 type
@@ -628,7 +751,32 @@ var
 begin
   Result := '';
   if SameText(ASection, SEC_DEBUG) and SameText(AKey, KEY_SAVE_IMAGE_DIR) then
-    Exit('Folder for "Save image" (context menu). Empty: your Documents folder, written here at the first save.');
+    Exit('Folder for "Save image" (context menu). Empty: your Documents folder, written here at the first save. '
+      + 'If the folder can''t be used (wrong path, missing drive), the image goes to your Documents folder.');
+  if SameText(ASection, SortSection) then
+  begin
+    if SameText(AKey, KEY_SORT_EDGE_DELAY) then
+      Exit('ms the mouse rests at the right edge of the window until the sort panel opens (default 500). '
+        + '0 = never (the menu entry "Sort panel (side menu)" and the mouse profile command SortPanel '
+        + 'still open it).');
+    if SameText(AKey, KEY_SORT_EDGE_WIDTH) then
+      Exit('How close to the right edge the mouse must rest to open the sort panel, in pixels '
+        + '(default 12, scaled for the screen; 2..60). Larger = easier to hit in a window.');
+    if SameText(AKey, KEY_SORT_PINNED) then
+      Exit('1 = the sort panel stays open after a copy / move (its pin). Written by MView.');
+    if SameText(AKey, KEY_DELETED_FOLDER) then
+      Exit('Where "Delete current image" moves files (MView never really deletes). '
+        + 'Empty = "MView deleted files" in your Documents folder.');
+    if SameText(AKey, KEY_ICON_FOLDER) then
+      Exit('Folder with .ico / .png icons for the sort panel. Empty = "icons" next to MView.exe.');
+    if SameText(AKey, KEY_TOTAL_COMMANDER) then
+      Exit('Total Commander (TOTALCMD64.EXE) for "Side by side". Empty = found by MView.');
+    if Pos('Slot', AKey) = 1 then
+      Exit('A sort panel folder (Folder, Name, Color, Icon). Set on the panel: drop a folder on it, '
+        + 'or its "..." menu. Colors: Green, Blue, Red, Yellow, Orange, Purple, Cyan, Grey.');
+    if Pos('Recent', AKey) = 1 then
+      Exit('A folder used recently for the sort panel (written by MView).');
+  end;
   for I := Low(KeyHelpTable) to High(KeyHelpTable) do
     if SameText(KeyHelpTable[I].Section, ASection)
       and SameText(KeyHelpTable[I].Key, AKey) then
@@ -718,6 +866,14 @@ end;
 
 procedure TConfig.Validate;
 begin
+  if FSortEdgeDelayMs < 0 then
+    FSortEdgeDelayMs := 0;
+  if (FSortEdgeDelayMs > 0) and (FSortEdgeDelayMs < 200) then
+    FSortEdgeDelayMs := 200;
+  if FSortEdgeWidth < 2 then
+    FSortEdgeWidth := 2;
+  if FSortEdgeWidth > 60 then
+    FSortEdgeWidth := 60;
   if FPreloadCount < 0 then
     FPreloadCount := 0;
   if FPreloadCount > 20 then

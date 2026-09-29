@@ -119,6 +119,7 @@ type
     maZoomMode, maRotateMode,
     maFullscreen, maInfo, maDiagnostics, maMenu,
     maPaste, maSaveImage, maEditMode, maEditOn, maEditOff, maCrop, maRescan,
+    maSortPanel, maDeleteImage, maUndo, maSideBySide,
     maBack, maExit
   );
 
@@ -297,6 +298,7 @@ const
     'ZoomMode', 'RotateMode',
     'Fullscreen', 'Info', 'Diagnostics', 'Menu',
     'Paste', 'SaveImage', 'EditMode', 'EditModeOn', 'EditModeOff', 'CropSelection', 'Rescan',
+    'SortPanel', 'DeleteImage', 'Undo', 'SideBySide',
     'Back', 'Exit');
   ActionCaptions: array[TMouseAction] of string = (
     '(nothing)',
@@ -310,6 +312,9 @@ const
     'Fullscreen on / off', 'Info line on / off', 'Diagnostics line on / off', 'Menu',
     'Paste image from the clipboard', 'Save image', 'Edit mode on / off', 'Edit mode on',
     'Edit mode off', 'Crop the selection', 'Read the folders again',
+    'Sort panel open / closed', 'Delete image (into the deleted-files folder)',
+    'Undo the last copy / move / delete',
+    'Side by side with Total Commander (on / off)',
     'Back (leave a mode, else the settings screen)', 'Exit');
 
   OrderNames: array[TZoneOrder] of string = ('None', 'Date', 'Name');

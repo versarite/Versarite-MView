@@ -176,6 +176,8 @@ type
     FCenterBar: TGLTextBar;
     FZoneBar: TGLTextBar;        { mouse language: the zone's name }
     FGestureBar: TGLTextBar;     { mouse language: what the gesture does }
+    FPanelBar: TGLTextBar;       { the sort panel (Phase G) }
+    FPanelUploaded: Cardinal;    { PanelVersion of the texture in FPanelBar }
 
     function MakeTextures(const AImage: IDecodedImage; ABitmap: TBGRACustomBitmap): TGLImageTextures;
     procedure DropTextures(var ATextures: TGLImageTextures);
@@ -186,6 +188,7 @@ type
     procedure UpdateFocus(ATextures: TGLImageTextures; AWidth, AHeight: Integer);
     procedure DrawTextures(ATextures: TGLImageTextures; AWidth, AHeight: Integer);
     procedure UpdateBar(var ABar: TGLTextBar; const AText: string; ACentered: Boolean);
+    procedure UpdatePanel;
     { ASolidWidth > 0: a solid black bar that wide behind the text
       (OverlaySolid) instead of the outline. }
     procedure DrawBar(const ABar: TGLTextBar; AX, AY: Integer; AOverlay: Boolean = False;
@@ -485,6 +488,8 @@ begin
   FDeleteQueue := nil;
   FreeAndNil(FPending);
   FreeAndNil(FShown);
+  ForgetBar(FPanelBar);
+  FPanelUploaded := 0;
   ForgetBar(FInfoBar);
   ForgetBar(FDiagBar);
   ForgetBar(FModeBar);
@@ -849,6 +854,58 @@ begin
   end;
 end;
 
+{ The sort panel's picture as a texture, uploaded again only when it
+  changed (PanelVersion). Drawn 1:1, no mipmaps. }
+procedure TGLRenderer.UpdatePanel;
+var
+  Bmp: TBGRABitmap;
+  W, H: Integer;
+  Base: PBGRAPixel;
+  Format: GLenum;
+begin
+  Bmp := Panel;
+  if (Bmp = nil) or (Bmp.Width <= 0) or (Bmp.Height <= 0) then
+    Exit;
+  if (FPanelBar.Texture <> 0) and (FPanelUploaded = PanelVersion) then
+    Exit;
+  if FPanelBar.Texture <> 0 then
+  begin
+    glDeleteTextures(1, @FPanelBar.Texture);
+    FPanelBar.Texture := 0;
+  end;
+  W := Bmp.Width;
+  H := Bmp.Height;
+  if PtrUInt(Bmp.ScanLine[0]) > PtrUInt(Bmp.ScanLine[H - 1]) then
+    Base := Bmp.ScanLine[H - 1]
+  else
+    Base := Bmp.ScanLine[0];
+  if PixelOrderIsBGRA then
+    Format := MV_GL_BGRA
+  else
+    Format := GL_RGBA;
+  glGenTextures(1, @FPanelBar.Texture);
+  glBindTexture(GL_TEXTURE_2D, FPanelBar.Texture);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, MV_GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, MV_GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  ClearGLErrors;
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, Format, GL_UNSIGNED_BYTE, Base);
+  if glGetError() <> GL_NO_ERROR then
+  begin
+    glDeleteTextures(1, @FPanelBar.Texture);
+    FPanelBar.Texture := 0;
+    Exit;
+  end;
+  if PtrUInt(Bmp.ScanLine[0]) > PtrUInt(Bmp.ScanLine[H - 1]) then
+    FPanelBar.Height := -H
+  else
+    FPanelBar.Height := H;
+  FPanelBar.Width := W;
+  FPanelUploaded := PanelVersion;
+end;
+
 { AX, AY: top-left corner on screen. The screen projection is set.
   AOverlay: the texture is white text on transparent; it is drawn over
   the image with a thin dark outline (the same texture tinted black,
@@ -1072,6 +1129,19 @@ begin
   if FGestureBar.Texture <> 0 then
     DrawBar(FGestureBar, (AWidth - FGestureBar.Width) div 2,
       (AHeight - Abs(FGestureBar.Height)) div 2, True);
+
+  { The sort panel, on top, with its transparency. }
+  if Assigned(Panel) then
+  begin
+    UpdatePanel;
+    if FPanelBar.Texture <> 0 then
+    begin
+      glEnable(GL_BLEND);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      DrawBar(FPanelBar, PanelX, PanelY);
+      glDisable(GL_BLEND);
+    end;
+  end;
 
   { Debugging: a picture of this frame, before it is shown. }
   if FScreenshotFile <> '' then

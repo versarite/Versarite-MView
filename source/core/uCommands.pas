@@ -106,6 +106,12 @@ type
     cmdShowZone,         { Value: Ord(TMouseZone): show the zone's name }
     cmdGesturePreview,   { X: Ord(TMouseZone); Value: Ord(TMouseEvent) + 1, 0 = none }
 
+    { Sorting into folders (Phase G) }
+    cmdSortPanel,        { open the sort panel (else the edge opens it) }
+    cmdDeleteImage,      { move the image into the deleted-files folder }
+    cmdUndo,             { take back the last copy / move / delete }
+    cmdSideBySide,       { MView left, Total Commander right (the form does it) }
+
     { Debugging }
     cmdSaveDebug,        { the decoded image and a picture of the window }
 
@@ -125,6 +131,17 @@ type
 
   TCommandEvent = procedure(Sender: TObject; ACommand: TCommand;
     const AArgs: TCommandArgs) of object;
+
+  { Mouse input offered to something drawn over the image (the sort
+    panel, Phase G) before the mouse engine sees it. The handler returns
+    True if it took the event (for a press: the release goes to it too,
+    and the engine sees neither). Moves are offered too (hover, the
+    edge timer); omLeave: the mouse left the view. ADouble: the second
+    press of a double-click. }
+  TOverlayMouseKind = (omDown, omMove, omUp, omWheel, omLeave);
+  TOverlayButton = (obLeft, obRight, obMiddle, obOther);
+  TOverlayMouseEvent = function(AKind: TOverlayMouseKind; AButton: TOverlayButton;
+    AX, AY, AWheel: Integer; AButtonDown, ADouble: Boolean): Boolean of object;
 
 function CommandArgs(AX: Double = 0; AY: Double = 0; AValue: Double = 0): TCommandArgs;
 

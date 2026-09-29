@@ -441,6 +441,10 @@ begin
     maEditOff:       Emit(cmdEditModeOff);
     maCrop:          Emit(cmdCropSelection);
     maRescan:        Emit(cmdRescan);
+    maSortPanel:     Emit(cmdSortPanel);
+    maDeleteImage:   Emit(cmdDeleteImage);
+    maUndo:          Emit(cmdUndo);
+    maSideBySide:    Emit(cmdSideBySide);
     { A zoom / rotate mode is the engine's own; everything else (edit
       mode, exit) TMView decides. }
     maBack:

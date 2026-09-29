@@ -36,7 +36,10 @@ unit uImageSaver;
   - SaveBitmapAsPng: write a bitmap as an 8-bit PNG without alpha,
     fastest compression; creates the folder; raises on failure.
   - TImageSaveThread: write the file; report the outcome as text
-    ("saved: ..." or "save failed: ...").
+    ("saved: ..." or "save failed: ..."). If the folder can't be
+    used, write the same name into the fallback folder (the user's
+    Documents folder) and say so (Day 20); SavedFileName is the file
+    actually written.
 
   Does NOT
   --------
@@ -55,6 +58,7 @@ unit uImageSaver;
   Uses (MView units)
   ------------------
   interface:      uTypes, uDecodedImage
+  implementation: uFileMover (UniqueFileName)
   Libraries:      Classes, SysUtils, FPWritePNG, ZStream, BGRABitmap,
                   BGRABitmapTypes
 
@@ -83,14 +87,26 @@ type
   private
     FImage: IDecodedImage;
     FFileName: string;
+    FFallbackDir: string;
+    FUnique: Boolean;
+    FSavedFileName: string;
     FResultText: string;
   protected
     procedure Execute; override;
   public
     { Starts at once. Not FreeOnTerminate: the owner frees it after
-      Finished (or after WaitFor at shutdown). }
-    constructor Create(const AImage: IDecodedImage; const AFileName: string);
+      Finished (or after WaitFor at shutdown). AFallbackDir: where the
+      file goes if AFileName's folder can't be used (wrong path in
+      MView.ini, missing drive, no permission); '' = no fallback. }
+    { AUnique (sorting a pasted or cropped image, Day 21): the folder
+      must exist (it is not made), and a name that is taken gets _1,
+      _2 ... (never overwritten). }
+    constructor Create(const AImage: IDecodedImage; const AFileName: string;
+      const AFallbackDir: string = ''; AUnique: Boolean = False);
+    { The file asked for. }
     property FileName: string read FFileName;
+    { The file actually written ('' if none), valid once Finished. }
+    property SavedFileName: string read FSavedFileName;
     { "saved: ..." or "save failed: ...", valid once Finished. }
     property ResultText: string read FResultText;
   end;
@@ -105,6 +121,9 @@ function SavedViewFileName(const ADirectory: string; const AImage: IDecodedImage
 procedure SaveBitmapAsPng(ABitmap: TBGRABitmap; const AFileName: string);
 
 implementation
+
+uses
+  uFileMover;
 
 function QualityName(AQuality: TQualityLevel): string;
 begin
@@ -158,23 +177,66 @@ end;
 
 { TImageSaveThread }
 
-constructor TImageSaveThread.Create(const AImage: IDecodedImage; const AFileName: string);
+constructor TImageSaveThread.Create(const AImage: IDecodedImage; const AFileName: string;
+  const AFallbackDir: string; AUnique: Boolean);
 begin
   FImage := AImage;
   FFileName := AFileName;
+  FFallbackDir := AFallbackDir;
+  FUnique := AUnique;
+  FSavedFileName := '';
   inherited Create(False);   { FreeOnTerminate stays False (default) }
 end;
 
 procedure TImageSaveThread.Execute;
+var
+  Fallback, Reason: string;
 begin
+  if (FImage = nil) or FImage.IsError or (FImage.Bitmap = nil) then
+  begin
+    FResultText := 'save failed: no decoded image';
+    FImage := nil;
+    Exit;
+  end;
+  if FUnique then
+  begin
+    if not DirectoryExists(ExtractFileDir(FFileName)) then
+    begin
+      FResultText := 'save failed: folder not found: ' + ExtractFileDir(FFileName);
+      FImage := nil;
+      Exit;
+    end;
+    FFileName := UniqueFileName(ExtractFileDir(FFileName), ExtractFileName(FFileName));
+  end;
   try
-    if (FImage = nil) or FImage.IsError or (FImage.Bitmap = nil) then
-      raise Exception.Create('no decoded image');
     SaveBitmapAsPng(FImage.Bitmap, FFileName);
+    FSavedFileName := FFileName;
     FResultText := 'saved: ' + FFileName;
   except
     on E: Exception do
-      FResultText := 'save failed: ' + E.Message;
+    begin
+      Reason := E.Message;
+      { The folder can't be used: the same name in the fallback folder
+        (Day 20, user: a wrong save folder in MView.ini lost the save). }
+      Fallback := '';
+      if (FFallbackDir <> '') and not SameText(
+        IncludeTrailingPathDelimiter(ExtractFileDir(FFileName)),
+        IncludeTrailingPathDelimiter(FFallbackDir)) then
+        Fallback := IncludeTrailingPathDelimiter(FFallbackDir) + ExtractFileName(FFileName);
+      if Fallback = '' then
+        FResultText := 'save failed: ' + Reason
+      else
+        try
+          SaveBitmapAsPng(FImage.Bitmap, Fallback);
+          FSavedFileName := Fallback;
+          FResultText := 'saved: ' + Fallback + '   (the folder '
+            + ExtractFileDir(FFileName) + ' could not be used: ' + Reason + ')';
+        except
+          on E2: Exception do
+            FResultText := 'save failed: ' + Reason + '; also in '
+              + FFallbackDir + ': ' + E2.Message;
+        end;
+    end;
   end;
   FImage := nil;
 end;

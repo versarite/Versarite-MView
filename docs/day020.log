@@ -1,0 +1,55 @@
+MView Day 20 (2026-09-28, evening)
+==================================
+
+Zoom comparison with ImageGlass (user)
+--------------------------------------
+The NASA world map at high zoom: ImageGlass smooths the pixels (blurred
+lake, the two dark pixels smeared); MView shows each pixel as a sharp
+square above 400 % and smooths only below that (mipmaps). For microscopy
+the honest view: no invented values between the measured ones.
+
+Phase F: info line and saving (user)
+------------------------------------
+"modify [the status line] such that the filename is left-most, then the
+image dimensions wxh, then the directory and then the other stats."
+- Info line: file name (without the folder), the image size in the file
+  (w x h of the original, also while a quick view is shown; only once
+  the image is there), the folder, then n / count, the sort order,
+  skimming / loading / scanning, animated frames and status notes.
+  (uMView.UpdateInfo; before: the full path first.)
+
+"if i put something wrong in the save image directory line in the ini,
+the picture is not saved. there should be a fallback dir, best the
+user's documents folder."
+- The save thread (uImageSaver.TImageSaveThread) now takes a fallback
+  folder: if the file can't be written where asked (a wrong path, a
+  missing drive, no permission), it writes the same name into the
+  user's Documents folder and the status line says "saved: <file>
+  (the folder <x> could not be used: <reason>)". Checked on the save
+  thread, where the file is written, so the window thread still never
+  touches the disk for it. SavedFileName = the file actually written
+  (the paste / crop info line uses it). The settings screen's help for
+  SaveImageDirectory says so.
+- uConfig.UserDocumentsDirectory is now public (the fallback folder).
+
+"upon right click - save image, there should be two choices like in
+irfan view: save file, and save file as, where a save dir dialog opens."
+- Menu: "Save image" (to the save folder, as before) and "Save image as
+  ..." (new): a Windows save dialog, starting in the folder chosen last
+  in this session (else the save folder), with the image's name as .png
+  (a paste or crop: its own name with the time); asks before
+  overwriting. PNG only: a .jpg / .tif / .bmp / .gif ending becomes
+  .png, any other ending gets .png added. The save folder in MView.ini
+  is not changed by it, and opening the dialog writes nothing. No
+  fallback here: the user chose the folder, so a failure is reported.
+- TMView: CanSaveImage, SaveAsSuggestion, SaveImageAs; ImageToSave and
+  StartSave shared by Save, Save as (and the fallback for the debugging
+  save too).
+- Spec §3.1, §8.6, §9.6, §14 updated.
+- Review (independent) found and fixed: a local variable "Name" in the
+  form's Save-as handler (a duplicate of the form's Name property in
+  ObjFPC mode: would not have compiled); Save as fell back to Documents
+  even for a folder the user picked; "cell.jpg" became "cell.jpg.png";
+  opening the dialog could write the Documents folder into MView.ini.
+
+Units changed: uMView, uImageSaver, uConfig, umainform.

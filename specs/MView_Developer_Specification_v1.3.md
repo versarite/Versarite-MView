@@ -22,6 +22,7 @@ Sections marked **[Decision]** are settled. Sections marked **[Open]** still nee
 - §12, §13, §14, §15: Day 18–19 measurements, memory limits, new ini keys, new tests.
 - §17, §18: phase table and decisions updated.
 - §1.1, §2.0 (Day 19, night): the homage to Hamana and the first principle; the Hamana mouse profile; the architecture pictures in `docs\architecture\`.
+- §9.6, §9.7, §14, §15 (Day 21): sorting into folders (Phase G, G1, first stage): the sort panel, copy / move / delete on a worker thread, Undo, `[Sort]` keys, `TestSort`. The plan for all of Phase G is `docs\Strategy_Phase_G.md`.
 
 ---
 
@@ -104,7 +105,7 @@ In practice:
 ### 3.1 Version 1 (mandatory)
 
 - Start from command line: `mview.exe image.tif` or `mview.exe C:\Experiment`. Started without arguments, MView shows its settings editor (§11). *(v1.3: a file or folder dropped on the window opens it the same way.)*
-- Fullscreen, no menu bar, no toolbar, no dialogs. *(v1.3: the right-click menu contains Paste image, Crop selection (edit mode only), Save image, Save image and view (debugging) and Exit, §9.6.)*
+- Fullscreen, no menu bar, no toolbar, no dialogs. *(v1.3: the right-click menu contains Paste image, Crop selection (edit mode only), Save image, Save image as …, Save image and view (debugging), About and Exit, §9.6. "Save image as …" opens the Windows save dialog: the one dialog, on request.)*
 - Formats: TIFF (highest priority), JPEG, PNG, BMP, GIF including animation. *(v1.3: GIF animation is done, §8.7.)*
 - Recursive directory navigation with wrap-around for images and directories. No dead ends. Wrap-around scope set in the ini: per folder or per tree.
 - Sort modes: date (newest → oldest, default) and natural filename.
@@ -586,7 +587,7 @@ Painting is event-driven (`Invalidate`). Continuous redraw happens only while so
 
 | Item | What it shows |
 |---|---|
-| Info line | File name, size, zoom; "skimming"; "animated, N frames"; "Cropped from <name>", "Clipboard image … not saved". |
+| Info line | *(Day 20, user)* File name, then the image size (w x h, of the original), then the folder, then position (n / count), sort order, "skimming", "animated, N frames" and status notes; for a crop or paste: "Cropped from <name>" / "Clipboard image", size, saved or not. |
 | Diagnostics line (D) | Now **two lines** (one ran past the right edge on a full-HD screen): decode, screen copy, cache, latency, paint times, queue, mode (SKIM / browse), "sharpening n / N", animation "frame i / N, k skipped" or "done", and a note if the memory limit left frames out. |
 | Mode label | "ZOOM" / "ROTATE" / "EDIT …" with a short hint (§9.5). |
 | Zone label | The zone's name in its corner, for 1.5 s when the mouse enters the zone and with each command from it. **Only while the diagnostics line is on** (otherwise distracting, user, Day 19). |
@@ -798,11 +799,49 @@ Menu entries (right click by default):
 |---|---|
 | Paste image (Ctrl+V) | Shows the clipboard's image ("Clipboard image … not saved") until the next step. |
 | Crop selection | Edit mode only (§9.5). |
-| Save image | Writes only the image, as PNG, to the save folder. |
+| Save image | Writes only the image, as PNG, to the save folder. If that folder can't be used (a wrong path in MView.ini, a missing drive, no permission), the file goes to the Documents folder and the status line says so *(Day 20)*. |
+| Save image as … | *(Day 20, user: "like in IrfanView")* A save dialog: starts in the folder last chosen this session (else the save folder), with the image's name as `.png`; asks before overwriting. PNG only (a .jpg / .tif / .bmp / .gif ending becomes .png, other names get .png added). No fallback folder: a failure is reported. The save folder in MView.ini stays as it is. |
 | Save image and view (debugging) | The old save: the decoded image and a picture of the window (§15). |
+| Sort panel (side menu) | *(Day 21)* Opens the sort panel (§9.7); it also opens at the right edge. |
+| Delete current image | *(Day 21)* Moves the file into the deleted-files folder (§9.7). MView never really deletes. |
+| Undo … | *(Day 21)* Only when there is something to take back; names it ("Undo move of cell.jpg to Good"). |
+| Make icon from this image | *(Day 21)* An icon for the sort panel from the selection (edit mode) or the middle of the screen (§9.7). |
+| Side by side with Total Commander | *(Day 21)* MView left half, Total Commander right half in the image's folder; again: back (§9.7). Ticked while on. |
 | Exit | Shows the emergency exit key next to it. |
 
 **Save folder** [Decision]: `[Debug] SaveImageDirectory`. If empty, the user's **Documents** folder (`SHGetFolderPath`, also when it was moved, e.g. to OneDrive), which is then written into MView.ini at the first save. In a read-only folder it is used for that session only. (An MView.ini written by earlier versions may still hold the old default `…\test\saved_images\`; delete the value to use Documents.)
+
+### 9.7 Sorting into folders *(Day 21, Phase G, G1)* [Decision]
+
+The decisions are in `docs\Strategy_Phase_G.md` (v5). Built in the first stage:
+
+- **The panel** (`uSortPanel`): a slim column at the right edge, drawn by MView into a picture that both renderers show on top (`TRenderer.SetPanel`, a version number tells the GPU renderer when to upload it again). One button per sort folder: a folder shape in the slot's colour with its number, the folder's name, a "…" corner. Below: "+ add folder"; at the top: the pin; at the bottom: a line with the last action (click: undo), or the hovered button's full folder.
+- **Elastic:** as tall as the window, about 160 px wide (scaled for the screen's DPI), each button between 36 and 20 px high (scaled), as many as fit; more than fit: the wheel scrolls the column.
+- **Opening:** the mouse rests `EdgeDelayMs` (0.5 s) within `EdgeWidth` (12 px, DPI-scaled; wider than a first 4 px, which was too hard to hit in a window, user) of the right edge with no button down (a right-drag gesture ending there doesn't open it); or the menu's "Sort panel (side menu)", or the `SortPanel` command (then it stays open until the mouse has been on it). **Closing:** unpinned, 0.6 s after the mouse has left it (also out of the window, or when another program gets the focus), and after every copy or move; Esc closes it first (before edit mode and the settings screen). The pin keeps it open (`[Sort] Pinned`).
+- **Mouse:** the surfaces offer every mouse event to the panel first (`OnOverlayMouse`, a hook in `TMediaView` and `TGLMediaView`); what lands on the open panel doesn't reach the mouse engine. A button acts on release, where it was pressed. **Double-click left = copy, double-click right = move** *(Day 21, user: single clicks "too erratic, many unnecessary moves / copies")*: a single click on a button only shows that in the bottom line. Double click = both clicks with the same mouse button on the same button within the Windows double-click time, hardly moved (MView's own timing, as the mouse engine's). The pin, "+", "…", the bottom line (undo) stay single clicks; a wheel click on a button opens its folder. Tilting the wheel over the panel does nothing.
+- **Confirmation** *(Day 21, user: "some kind of visual confirmation ... a flash in the folder icon color")*: while a copy / move runs, its button has a frame in the folder's colour; when it is done, the button lights up in that colour with a check mark and fades within 0.9 s. Failed or refused ("already in Good"): red with a cross. Delete and Undo flash the bottom line (neutral, or red). Unpinned, the panel closes after the flash, not at the click (at the latest 3 s later, for a slow copy); a result that arrives with the panel closed (e.g. Delete from the menu) flashes a narrow strip at the right edge. The status line says it in words as before.
+- **Copy / move / delete** run on one worker thread (`uFileMover`), in order, never on the window thread. Never overwrite: an existing name gets `_1`, `_2` …. A file in use is tried again for 2 s. A move to another drive whose original can't be removed afterwards (in use) is reported and counted as a copy. A missing sort folder is reported, not made. Every job is written to `sorting.log` next to MView.exe (`time;action;from;to;result`, `sep=;` for Excel).
+- **Moving is instant:** the image leaves the lists at once and the next one shows (like a step forward); if the move fails it comes back, and is shown again if the user hasn't gone on. A copy or move into a folder that is being browsed shows up there. Moves made while the folder tree is still being scanned are applied to the tree when it arrives (it was listed before them).
+- **Delete** = move into the deleted-files folder (`[Sort] DeletedFolder`, default `Documents\MView deleted files`, made when needed). There is no real delete and no "empty" button. An image in the deleted-files folder already is not "deleted" again.
+- **Undo** (menu, `Undo` command, the panel's bottom line) takes back the newest copy / move / delete, up to 50 in a row: a moved or deleted file goes back to its folder (under its old name, or `_1` if that is taken now) and is shown again if its folder is the one being browsed; a copy is *moved into the deleted-files folder* (never deleted). While a copy / move is still under way, Undo is refused ("still copying / moving: undo when it is done"), so it never takes back an older one by mistake. A delete whose file was in use is reported, with nothing to undo. No confirmations: undo instead.
+- **A pasted or cropped image** is not a file: sorting asks to save it first. Copying into the folder the image is already in is refused ("already in Good").
+- **Choosing folders** (the "…" corner, or "+"): a menu with *Choose folder …* (the Windows folder dialog, starting in the slot's folder, else next to the folder chosen last, else the parent of the image's folder, else Documents), *Recent folders* (8), *This image's folder*, *Its parent folder*; for a slot also *Colour* (8 colours), *Move up / down*, *Remove this button*. From "+", every choice adds a button. **Drag and drop** (e.g. from Total Commander): folders dropped on the open panel become sort folders: onto a button, the first replaces it, the others are added; anywhere else on the panel, all are added. Dropped elsewhere a folder opens as before.
+- Everything is kept in `MView.ini`, `[Sort]` (§14), saved at once when a slot changes.
+- **Closing MView** while a copy or move runs waits for it (never half a file); the watchdog's exit deadline is 2 min instead of 4 s then. Jobs not started yet are dropped (the files stay where they are).
+- **Exceptions to §10** (made by hand, rare): a drop on the panel checks which dropped names are folders, and the folder dialog's start folder is checked, on the window thread. The navigator's lists are changed in place by sorting (`RemoveFile`, `AddFile`), instead of waiting for a rescan.
+- Mouse profile commands: `SortPanel`, `DeleteImage`, `Undo` (none bound by default).
+
+**Stage 2 (Day 21):**
+
+- **Icons** from the icon folder (`[Sort] IconFolder`, default `icons\` next to MView.exe): a button uses its own icon (`Slot<n>Icon`: a name in the icon folder or a full path; `-` = the coloured folder) or, without one, the icon named like its folder (`Good.ico` / `Good.png` for `…\Good`). Assigned by dropping an .ico / .png on the button, or in the "…" menu → Icon (by name, none, the icon folder's icons with their pictures, "Choose icon file …", "Open the icon folder"). Scaled to the button with a fine filter, from the smallest picture in the .ico at least that large (1, 4, 8, 24, 32-bit and PNG entries, `uIconFile`); the number sits small in a corner. The icon folder and extra icon files are read, and every sort folder is checked, on a thread of its own (`uSortIcons`) when the panel opens (again after 3 s), when a slot changes and after an icon is made. A folder not found is drawn grey; its bottom line says "folder not found".
+- **Make icon from this image** (menu): the edit-mode selection, else the middle of the screen, as a square (the shorter side); scaled to 16, 24, 32, 48, 64, 128 and 256 px, PNG pictures with alpha in one .ico, named after the current image's folder (`IconBaseName`), written by the mover thread into the icon folder; an existing one is renamed `<name>_previous.ico` (then `_previous_1` …), never overwritten. The buttons that find it by name flash once it is written.
+- **Into a slot's folder** *(user: "no way to switch into the side panel folders")*: a swipe to the right over its button (at least 40 px, more sideways than up / down), a wheel click on it, or "Open this folder" in its "…" menu: the folder is opened for browsing (like a drop).
+- **A pasted or cropped image** *(user)*: copying / moving it with the panel saves it as PNG into that folder (`<name>_<time>.png`, `_1` if taken; the folder must exist). Left click: it stays on screen; right click: the file shown before comes back at once (if the save then fails, the image comes back). Undo moves the saved file into the deleted-files folder. "Delete current image" on a pasted image just closes it.
+- **Settings screen** *(user)*: Ctrl+V with an image (and no text) in the clipboard opens the viewer with that image (the last session opens behind it, for the next step); files dropped anywhere on the settings screen, also on the text, open as before.
+
+- **Side by side with Total Commander** *(Day 21, user)*: menu entry (ticked while on) and mouse profile command `SideBySide`. MView fills the left half of its screen's work area (the taskbar stays free), Total Commander the right half, so the sort panel sits right next to it. Total Commander opens the image's folder in its active panel (`TOTALCMD64.EXE /O /S /L=<folder>`; a running one gets it passed, otherwise it is started). The program: `[Sort] TotalCommander` (the program or its folder), else the running one's, else its registry entry (`InstallDir`), else `C:\totalcmd` and the Program Files folders. Windows 10 / 11's invisible window borders are corrected so the halves meet. A Total Commander just started is placed when its window appears (up to 60 s: an unregistered copy shows its reminder first); a running one is placed at once and again after 0.6 s (it may bring itself up when it gets the folder). Again (or fullscreen, or Esc to the settings screen): MView goes back to fullscreen / its place before; Total Commander stays. The window place saved in MView.ini is the place before, never the half. Limit (accepted): a Total Commander running as administrator can't be moved by MView ("does it run as administrator?"). Unit `uTotalCommander`.
+
+Next stages (Strategy_Phase_G.md): G6 magnifier, G4 filters; a settings page for the sort folders.
 
 ---
 
@@ -1017,7 +1056,16 @@ ZoomStepPercent=20      ; * zoom step per wheel notch (1..200)
 ShowFPS=0               ; diagnostics line (key D)
 TimingLog=0             ; timing.csv and * startup.csv next to MView.exe
 DecodeDelayMs=0         ; testing: every decode waits this long
-SaveImageDirectory=     ; * for "Save image"; empty = the user's Documents folder, written here at the first save
+SaveImageDirectory=     ; * for "Save image"; empty = the user's Documents folder, written here at the first save; not usable = Documents for that save
+[Sort]                  ; Day 21, §9.7
+EdgeDelayMs=500         ; ms at the right edge until the sort panel opens; 0 = never (menu / command still open it)
+EdgeWidth=12            ; px from the right edge that count as "at the edge" (96 dpi, scaled; 2..60)
+Pinned=0                ; the panel stays open
+DeletedFolder=          ; where "Delete" moves files; empty = Documents\MView deleted files
+IconFolder=             ; (next stage) button icons; empty = icons\ next to MView.exe
+TotalCommander=         ; (next stage) path of TOTALCMD64.EXE
+Slot1Folder= / Slot1Name= / Slot1Color= / Slot1Icon=   ; one group per button, written by MView
+Recent1= … Recent8=     ; folders chosen last, written by MView
 ```
 
 Not used yet: `OpenLastSession` (see §11), `BackgroundScan`. *(v1.3: `[Mouse] Profile` and `MouseCursorHideTime` are now used.)*
@@ -1043,6 +1091,8 @@ Not used yet: `OpenLastSession` (see §11), `BackgroundScan`. *(v1.3: `[Mouse] P
 | `TestExif.lpr` | **40** | As before, plus (Day 18) `uJpegHeader`: size, orientation and thumbnail of the four pictures in `test\images\thumb` (one with big-endian EXIF), no thumbnail, missing file; `AspectCrop`. |
 | `TestMouse.lpr` *(new)* | 58 in the user's run of 16:11, before the edit mode and zones switch checks were added | Profile parsing, errors with line numbers, save / load round trip, zones and dead band; the engine with a fake clock: zone order, wheel parts, zoom / turn smoothness, click vs double-click timing, drag (start / point reported), menu, gestures and preview, tilt repeat, X1 mode and Browser Back echo, Esc = Back, keys, each arrow key, focus lost, Edit zone click / double-click, zones off. |
 | `TestGif.lpr` *(new)* | 156 (user's run 02:14), 198 (16:11) | Every file in `test\images\gif` and Test.gif against `expected.txt` (size, frames, delays, a checksum of every frame); the **GIF test suite** (`animated_*.gif`, `static_*.gif`): every frame against its reference picture in `gif\frames` (transparent pixels by transparency only) and the loop counts; the first frame alone and from the start of a file only; a PNG named .gif; cut at every length; 300 random corruptions; frames claiming 65535 × 65535; cancel; memory limit; the frame clock (skipping, stalls, 1 and 2 plays). |
+
+*(Day 21)* `TestSort.lpr` (plain fpc): `UniqueFileName`, copy / move / missing source / missing folder / folder made on request / undo, the log, the mover thread (delivery in order on the main thread, freed with jobs waiting), and `TSortFolders` (slots, colours, move, remove, limits, the `[Sort]` round trip, stale keys removed). `TestNavigation` gets `TestRemoveAndAdd` (a file moved away and back: `RemoveFile`, `AddFile`, `SelectFile`).
 
 User's run 2026-09-27 16:11: 87 + 40 + 58 + 198 passed, 0 failed. `expected.txt` comes from `gifproto.py`, the Python copy of the decoder, checked against Pillow. See `test\images\gif\README.txt`.
 

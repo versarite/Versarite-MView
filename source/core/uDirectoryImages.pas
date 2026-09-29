@@ -104,6 +104,12 @@ type
     function DateModified(AIndex: Integer): TDateTime;
     function IndexOfFile(const AFileName: string): Integer;
 
+    { Sorting into folders (Phase G): a file moved away or back, or
+      copied in. Delete removes entry AIndex; AddFile adds one and
+      keeps the list sorted (nothing if it is already listed). }
+    procedure Delete(AIndex: Integer);
+    procedure AddFile(const AFileName: string; ASize: Int64; AModified: TDateTime);
+
     property Directory: string read FDirectory;
     { Setting the sort mode re-sorts the list at once. }
     property SortMode: TSortMode read FSortMode write SetSortMode;
@@ -298,6 +304,27 @@ begin
     if SameText(FEntries[I].FileName, AFileName) then
       Exit(I);
   Result := -1;
+end;
+
+procedure TDirectoryImages.Delete(AIndex: Integer);
+var
+  I: Integer;
+begin
+  if (AIndex < 0) or (AIndex >= FCount) then
+    Exit;
+  for I := AIndex to FCount - 2 do
+    FEntries[I] := FEntries[I + 1];
+  Dec(FCount);
+  FEntries[FCount].FileName := '';
+end;
+
+procedure TDirectoryImages.AddFile(const AFileName: string; ASize: Int64;
+  AModified: TDateTime);
+begin
+  if IndexOfFile(AFileName) >= 0 then
+    Exit;
+  AddEntry(AFileName, ASize, AModified);
+  Sort;
 end;
 
 end.

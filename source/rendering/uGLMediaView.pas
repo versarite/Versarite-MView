@@ -83,6 +83,8 @@ type
     FRenderer: TGLRenderer;
     FInput: TMouseEngine;
     FOnCommand: TCommandEvent;
+    FOnOverlayMouse: TOverlayMouseEvent;
+    FOverlayCapture: Boolean;    { a press went to the overlay: so does its release }
     procedure HandleInputCommand(Sender: TObject; ACommand: TCommand; const AArgs: TCommandArgs);
     function MousePosition: TPoint;
   protected
@@ -91,6 +93,7 @@ type
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
+    procedure MouseLeave; override;
     function DoMouseWheel(Shift: TShiftState; WheelDelta: Integer;
       MousePos: TPoint): Boolean; override;
     function DoMouseWheelHorz(Shift: TShiftState; WheelDelta: Integer;
@@ -107,6 +110,8 @@ type
     property Renderer: TGLRenderer read FRenderer write FRenderer;
     property Input: TMouseEngine read FInput;
     property OnCommand: TCommandEvent read FOnCommand write FOnCommand;
+    { The sort panel (Phase G): offered every mouse event first. }
+    property OnOverlayMouse: TOverlayMouseEvent read FOnOverlayMouse write FOnOverlayMouse;
   end;
 
 implementation
@@ -162,6 +167,17 @@ begin
   inherited KeyUp(Key, Shift);
 end;
 
+function OverlayButtonOf(AButton: TMouseButton): TOverlayButton;
+begin
+  case AButton of
+    mbLeft:  Result := obLeft;
+    mbRight: Result := obRight;
+    mbMiddle: Result := obMiddle;
+  else
+    Result := obOther;
+  end;
+end;
+
 procedure TGLMediaView.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 var
   B: TEngineButton;
@@ -169,6 +185,13 @@ begin
   inherited MouseDown(Button, Shift, X, Y);
   if CanFocus and not Focused then
     SetFocus;
+  { The sort panel first (Phase G). }
+  if Assigned(FOnOverlayMouse) and FOnOverlayMouse(omDown, OverlayButtonOf(Button),
+    X, Y, 0, True, ssDouble in Shift) then
+  begin
+    FOverlayCapture := True;
+    Exit;
+  end;
   FInput.SetViewSize(ClientWidth, ClientHeight);
   if EngineButton(Button, B) then
     FInput.MouseDown(B, X, Y, GetTickCount64);
@@ -177,6 +200,11 @@ end;
 procedure TGLMediaView.MouseMove(Shift: TShiftState; X, Y: Integer);
 begin
   inherited MouseMove(Shift, X, Y);
+  if Assigned(FOnOverlayMouse) then
+    FOnOverlayMouse(omMove, obOther, X, Y, 0,
+      (ssLeft in Shift) or (ssRight in Shift) or (ssMiddle in Shift), False);
+  if FOverlayCapture then
+    Exit;
   FInput.SetViewSize(ClientWidth, ClientHeight);
   FInput.MouseMove(X, Y, ssLeft in Shift, ssRight in Shift, GetTickCount64);
 end;
@@ -186,9 +214,23 @@ var
   B: TEngineButton;
 begin
   inherited MouseUp(Button, Shift, X, Y);
+  if FOverlayCapture then
+  begin
+    FOverlayCapture := False;
+    if Assigned(FOnOverlayMouse) then
+      FOnOverlayMouse(omUp, OverlayButtonOf(Button), X, Y, 0, False, False);
+    Exit;
+  end;
   FInput.SetViewSize(ClientWidth, ClientHeight);
   if EngineButton(Button, B) then
     FInput.MouseUp(B, X, Y, GetTickCount64);
+end;
+
+procedure TGLMediaView.MouseLeave;
+begin
+  inherited MouseLeave;
+  if Assigned(FOnOverlayMouse) then
+    FOnOverlayMouse(omLeave, obOther, 0, 0, 0, False, False);
 end;
 
 function TGLMediaView.DoMouseWheel(Shift: TShiftState; WheelDelta: Integer;
@@ -197,6 +239,10 @@ var
   P: TPoint;
 begin
   P := MousePosition;
+  Result := True;
+  if Assigned(FOnOverlayMouse) and FOnOverlayMouse(omWheel, obOther, P.X, P.Y,
+    WheelDelta, False, False) then
+    Exit;
   FInput.SetViewSize(ClientWidth, ClientHeight);
   FInput.Wheel(WheelDelta, P.X, P.Y, GetTickCount64);
   Result := True;
@@ -208,6 +254,10 @@ var
   P: TPoint;
 begin
   P := MousePosition;
+  { Tilting over the open sort panel does nothing (not a folder step). }
+  if Assigned(FOnOverlayMouse) and FOnOverlayMouse(omWheel, obOther, P.X, P.Y,
+    0, False, False) then
+    Exit(True);
   FInput.SetViewSize(ClientWidth, ClientHeight);
   FInput.WheelHorz(WheelDelta, P.X, P.Y, GetTickCount64);
   Result := True;

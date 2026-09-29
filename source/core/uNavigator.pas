@@ -16,6 +16,8 @@ unit uNavigator;
     a copy).
   - FListings: up to MaxCachedListings (64) TDirectoryImages of other
     folders, read from disk for FilesAhead (only when ReadsDisk).
+  - FJournal: files sorted away or in while the tree was still being
+    scanned (Phase G), applied in SetTree.
 
   Knows
   -----
@@ -117,6 +119,15 @@ uses
 
 type
 
+  { A file moved away (Added False) or in (True) while the tree was
+    still being scanned: applied to the tree when it arrives. }
+  TListChange = record
+    Added: Boolean;
+    FileName: string;
+    Size: Int64;
+    Modified: TDateTime;
+  end;
+
   TNavigator = class(TObject)
   private
     FTree: TDirectoryTree;
@@ -130,6 +141,9 @@ type
     FTreeReady: Boolean;
     FListings: TFPList;          { TDirectoryImages of other folders }
     FReadsDisk: Boolean;
+    FJournal: array of TListChange;  { changes the coming tree doesn't know yet }
+    procedure Journal(AAdded: Boolean; const AFileName: string; ASize: Int64;
+      AModified: TDateTime);
 
     function GetCurrentDirectory: string;
     function Listing(const ADirectory: string): TDirectoryImages;
@@ -169,6 +183,23 @@ type
       if the file is in none of the lists held. }
     function ListedKey(const AFileName: string; out AKey: TImageKey): Boolean;
 
+    { Sorting into folders (Phase G), no disk access:
+      - RemoveFile: AFileName was moved away. It leaves every list held
+        (the current folder, the tree, the cached listings). If it was
+        the current image, the next one becomes current, as with "next
+        image"; True if the current image changed.
+      - AddFile: AFileName appeared (copied in, or moved back by Undo).
+        Added to the lists held for its folder (a folder not held is
+        listed when it is visited). The current image stays current.
+      - SelectFile: makes AFileName current if it is in the current
+        folder's list; True if it is.
+      While the tree is still being scanned, removals and additions are
+      also noted and applied to the tree when it arrives (SetTree): it
+      was listed before them. }
+    function RemoveFile(const AFileName: string): Boolean;
+    procedure AddFile(const AFileName: string; ASize: Int64; AModified: TDateTime);
+    function SelectFile(const AFileName: string): Boolean;
+
     procedure SetSortMode(AMode: TSortMode);
     { Switches between date (newest first) and file name order. }
     procedure ToggleSortMode;
@@ -203,6 +234,9 @@ type
   end;
 
 implementation
+
+uses
+  uImageFormats;
 
 constructor TNavigator.Create;
 begin
@@ -501,6 +535,7 @@ begin
   begin
     FTree.Clear;
     FTreeReady := False;
+    FJournal := nil;
   end
   else
   begin
@@ -541,6 +576,7 @@ begin
   FRootDirectory := ExcludeTrailingPathDelimiter(ARoot);
   FTree.Clear;
   FTreeReady := False;
+  FJournal := nil;
 
   FImages.SortMode := FSortMode;
   if AListing <> nil then
@@ -566,8 +602,8 @@ end;
 function TNavigator.SetTree(ATree: TDirectoryTree): Boolean;
 var
   OldFile: string;
-  OldIndex: Integer;
-  Source: TDirectoryImages;
+  OldIndex, I: Integer;
+  Source, List: TDirectoryImages;
 begin
   OldFile := CurrentFileName;
   OldIndex := FCurrentIndex;
@@ -575,6 +611,19 @@ begin
   FTree := ATree;
   FTreeReady := True;
   ClearListings;
+  { Files moved away or in while it was being scanned (sorting): the
+    tree was listed before that. }
+  for I := 0 to High(FJournal) do
+  begin
+    List := TreeImages(ExcludeTrailingPathDelimiter(ExtractFileDir(FJournal[I].FileName)));
+    if List = nil then
+      Continue;
+    if FJournal[I].Added then
+      List.AddFile(FJournal[I].FileName, FJournal[I].Size, FJournal[I].Modified)
+    else
+      List.Delete(List.IndexOfFile(FJournal[I].FileName));
+  end;
+  FJournal := nil;
   { The scanner may have chosen another root (an opened file in a
     folder its scan skips). }
   if (FTree.Root <> nil) and not SameText(FTree.Root.Path, FRootDirectory) then
@@ -622,6 +671,112 @@ begin
   AKey.FileSize := List.FileSize(Idx);
   AKey.FileTime := List.DateModified(Idx);
   Result := True;
+end;
+
+procedure TNavigator.Journal(AAdded: Boolean; const AFileName: string; ASize: Int64;
+  AModified: TDateTime);
+var
+  N: Integer;
+begin
+  N := Length(FJournal);
+  SetLength(FJournal, N + 1);
+  FJournal[N].Added := AAdded;
+  FJournal[N].FileName := AFileName;
+  FJournal[N].Size := ASize;
+  FJournal[N].Modified := AModified;
+end;
+
+function TNavigator.RemoveFile(const AFileName: string): Boolean;
+var
+  Dir: string;
+  List: TDirectoryImages;
+  I, Idx: Integer;
+  Old: string;
+begin
+  Old := CurrentFileName;
+  if not FTreeReady then
+    Journal(False, AFileName, 0, 0);
+  Dir := ExcludeTrailingPathDelimiter(ExtractFileDir(AFileName));
+
+  { The tree's list and cached listings of that folder. }
+  List := TreeImages(Dir);
+  if List <> nil then
+    List.Delete(List.IndexOfFile(AFileName));
+  for I := 0 to FListings.Count - 1 do
+  begin
+    List := TDirectoryImages(FListings[I]);
+    if SameText(List.Directory, Dir) then
+      List.Delete(List.IndexOfFile(AFileName));
+  end;
+
+  { The current folder's own copy. }
+  Idx := -1;
+  if SameText(FImages.Directory, Dir) then
+    Idx := FImages.IndexOfFile(AFileName);
+  if Idx >= 0 then
+  begin
+    FImages.Delete(Idx);
+    if Idx < FCurrentIndex then
+      Dec(FCurrentIndex)
+    else if Idx = FCurrentIndex then
+    begin
+      { The one after it now has its index: that is "next". At the end
+        of the folder, "next" from the new last image (next folder, or
+        wrap). The folder is empty now: the next folder with images. }
+      if FImages.Count = 0 then
+      begin
+        FCurrentIndex := -1;
+        SeekDirectory(1, False);
+      end
+      else if FCurrentIndex >= FImages.Count then
+      begin
+        FCurrentIndex := FImages.Count - 1;
+        NextImage;
+      end;
+    end;
+  end;
+  Result := not SameText(Old, CurrentFileName);
+end;
+
+procedure TNavigator.AddFile(const AFileName: string; ASize: Int64; AModified: TDateTime);
+var
+  Dir, Current: string;
+  List: TDirectoryImages;
+  I: Integer;
+begin
+  if not IsSupportedImageFile(AFileName) then
+    Exit;
+  if not FTreeReady then
+    Journal(True, AFileName, ASize, AModified);
+  Dir := ExcludeTrailingPathDelimiter(ExtractFileDir(AFileName));
+  List := TreeImages(Dir);
+  if List <> nil then
+    List.AddFile(AFileName, ASize, AModified);
+  for I := 0 to FListings.Count - 1 do
+  begin
+    List := TDirectoryImages(FListings[I]);
+    if SameText(List.Directory, Dir) then
+      List.AddFile(AFileName, ASize, AModified);
+  end;
+  if SameText(FImages.Directory, Dir) then
+  begin
+    Current := CurrentFileName;
+    FImages.AddFile(AFileName, ASize, AModified);
+    if Current <> '' then
+      FCurrentIndex := FImages.IndexOfFile(Current)
+    else
+      FCurrentIndex := FImages.IndexOfFile(AFileName);
+  end;
+end;
+
+function TNavigator.SelectFile(const AFileName: string): Boolean;
+var
+  Idx: Integer;
+begin
+  Idx := FImages.IndexOfFile(AFileName);
+  Result := Idx >= 0;
+  if Result then
+    FCurrentIndex := Idx;
 end;
 
 procedure TNavigator.SetSortMode(AMode: TSortMode);

@@ -135,6 +135,10 @@ type
     FZoneLabel: string;
     FZoneCorner: Integer;
     FGestureText: string;
+    { The sort panel (Phase G): drawn on top of everything. }
+    FPanel: TBGRABitmap;
+    FPanelX, FPanelY: Integer;
+    FPanelVersion: Cardinal;
     FEditMode: Boolean;
     FSelection: TImageRect;
     FOverlaySolid: Boolean;
@@ -262,6 +266,14 @@ type
     property ZoneLabel: string read FZoneLabel write FZoneLabel;
     property ZoneCorner: Integer read FZoneCorner write FZoneCorner;
     property GestureText: string read FGestureText write FGestureText;
+    { The sort panel's picture (not owned; nil = none), where it goes,
+      and a number that changes whenever the picture does (the GPU
+      renderer uploads it again then). }
+    procedure SetPanel(ABitmap: TBGRABitmap; AX, AY: Integer; AVersion: Cardinal);
+    property Panel: TBGRABitmap read FPanel;
+    property PanelX: Integer read FPanelX;
+    property PanelY: Integer read FPanelY;
+    property PanelVersion: Cardinal read FPanelVersion;
     property OnImagePainted: TImagePaintedEvent read FOnImagePainted write FOnImagePainted;
     property View: TViewState read FView;
   end;
@@ -896,6 +908,14 @@ begin
   FRotatedTurns := QuarterTurns;
 end;
 
+procedure TRenderer.SetPanel(ABitmap: TBGRABitmap; AX, AY: Integer; AVersion: Cardinal);
+begin
+  FPanel := ABitmap;
+  FPanelX := AX;
+  FPanelY := AY;
+  FPanelVersion := AVersion;
+end;
+
 procedure TCpuRenderer.Paint(ACanvas: TCanvas; AWidth, AHeight: Integer);
 var
   StartMs: Double;
@@ -940,6 +960,9 @@ begin
   NewImagePainted := EndImagePart(StartMs);
 
   DrawOverlays(ACanvas, AWidth, AHeight);
+  { The sort panel, on top (with its transparency). }
+  if Assigned(Panel) then
+    Panel.Draw(ACanvas, PanelX, PanelY, False);
 
   if NewImagePainted then
     ReportPainted;

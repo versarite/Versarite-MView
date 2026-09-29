@@ -26,6 +26,17 @@ unit uMView;
   - FSaveThread (TImageSaveThread): a "Save image" in progress.
   - Animation playback: FAnimTimer (TTimer), FAnimCursor, FAnimClock.
   - The lists FNoRoom and FNoPreview (TStringList).
+  - Sorting (Phase G): FPanel (TSortPanel, the panel at the right
+    edge), FMover (TFileMover, its worker thread; made at the first
+    copy / move / delete), the undo list FUndo (up to 50 entries) and
+    FMoves (moves under way). The file sorting.log next to MView.exe
+    (the mover appends to it).
+  - Stage 2: FIcons (TSortIcons: the buttons' icons and the missing-
+    folder check, read on its own thread when the panel opens), the
+    making of an icon from the image (MakeIconFromImage, written by the
+    mover), sorting a pasted or cropped image (saved into the folder by
+    the save thread), a swipe / wheel click into a slot's folder, and
+    the paste from the settings screen (StartWithPaste).
   - The files startup.csv and timing.csv next to MView.exe (appended
     to with [Debug] TimingLog=1). It also writes the mouse profile
     file with the built-in profile if it isn't there yet.
@@ -43,6 +54,9 @@ unit uMView;
   - The global IOGate (uIOGate), released at shutdown so the scanner
     doesn't wait.
   - The clipboard (paste) and the save folder of TConfig.
+  - TConfig.SortFolders (the slots, changed by the form's slot menu or
+    a drop), SortEdgeDelayMs, SortPinned, DeletedFilesFolder.
+  - OnSortMenu: the form's slot menu.
 
   Responsibilities
   ----------------
@@ -60,6 +74,14 @@ unit uMView;
     image (on a save thread), sort order, parent folder.
   - Show the zone name and the gesture preview of the mouse language
     (only with the diagnostics line on).
+  - Sorting (Phase G, G1): the panel's mouse (hover, edge opening, the
+    wheel scrolls, left click on a button = copy, right click = move,
+    pin, bottom line = undo); copy / move / delete on the mover's
+    thread; a moved or deleted image leaves the lists at once and the
+    next one shows (back if the move fails); a copy or move into a
+    browsed folder shows up there; Undo (a copy goes into the
+    deleted-files folder, a moved or deleted file back to its folder).
+    Nothing is ever really deleted and nothing overwritten (_1).
   - Keep the settings that change while viewing (info line,
     diagnostics line, sort mode, last folder and file) and save them
     first on shutdown.
@@ -70,7 +92,10 @@ unit uMView;
   - Handle raw input.
   - Depend on the form. Window actions (exit, fullscreen) are
     requested through events that the form connects.
-  - Show the menu (the main form does, on cmdShowMenu).
+  - Show the menu (the main form does, on cmdShowMenu), nor the slot
+    menu or folder dialogs (the form, through OnSortMenu).
+  - Touch the disk for sorting on the window thread (the mover does;
+    only SortStartFolder checks a few folders, when a dialog opens).
 
   Threads
   -------
@@ -80,7 +105,9 @@ unit uMView;
   PumpDeliveries (the form's 50 ms timer) picks up any that wait
   (CheckSynchronize). The save thread only writes its file; its
   result is read in PumpDeliveries once it has finished. The
-  animation runs on a UI-thread TTimer. No locks of its own.
+  animation runs on a UI-thread TTimer. The file mover's results
+  arrive through TThread.Queue as well (HandleFileJobDone). No locks of
+  its own.
 
   Uses (MView units)
   ------------------
@@ -88,9 +115,11 @@ unit uMView;
                   uNavigator, uDecodedImage, uMediaLoader,
                   uImageCache, uJobScheduler, uDirectoryScanner,
                   uRenderer, uAnimation, uMouseProfile, uJobQueue,
-                  uIOGate, uMemoryGuard, uImageSaver, uStopwatch
+                  uIOGate, uMemoryGuard, uImageSaver, uStopwatch,
+                  uSortFolders, uSortPanel, uFileMover
   Libraries:      Classes, SysUtils, Math, Controls, ExtCtrls,
-                  Graphics, Clipbrd, BGRABitmap, BGRABitmapTypes
+                  Graphics, Clipbrd, BGRABitmap, BGRABitmapTypes,
+                  Forms (implementation: Screen, for the DPI)
 
   Used by
   -------
@@ -218,9 +247,38 @@ uses
   uIOGate,
   uMemoryGuard,
   uImageSaver,
-  uStopwatch;
+  uStopwatch,
+  uSortFolders,
+  uSortPanel,
+  uSortIcons,
+  uFileMover;
 
 type
+
+  { Sorting (Phase G): one copy / move / delete that can be taken back. }
+  TUndoEntry = record
+    Id: Integer;
+    Kind: TFileJobKind;      { fjSort or fjDelete }
+    Action: TFileAction;     { faCopy: a copy was made; faMove: the file went }
+    Original: string;        { where the file was (is, for a copy) }
+    Placed: string;          { the copy, or where the file went }
+    Caption: string;         { the slot's name, or 'deleted files' }
+    Pending: Boolean;        { its undo is under way }
+  end;
+
+  { A move under way: the file left the lists at once; if the move
+    fails it comes back. }
+  TMoveUnderWay = record
+    JobId: Integer;
+    Source: string;
+    Key: TImageKey;          { its size and date, as listed }
+    FollowedBy: string;      { the file current after it left }
+  end;
+
+  { The panel's "..." corner of slot ASlot, or its "+" (ASlot = -1):
+    the form shows the folder menu / dialog at AScreen. }
+  TSortMenuEvent = procedure(ASlot: Integer; const AScreen: TPoint) of object;
+
 
   TMView = class(TObject)
   private
@@ -277,6 +335,7 @@ type
     FSavingPaste: Boolean;
     FScratchTitle: string;       { 'Clipboard image', 'Cropped from x.jpg' }
     FScratchPrefix: string;      { file name start when saved }
+    FSaveAsDir: string;          { "Save image as": the folder last chosen (session) }
 
     { Edit mode: left drag selects an area of the image, which "Crop
       selection" makes the image shown. The anchor is where the drag
@@ -317,10 +376,50 @@ type
     FAnimClock: TFrameClock;
     FAnimTimer: TTimer;
 
+    { Sorting (Phase G, G1): the panel at the right edge, the file mover
+      (made at the first copy / move / delete: nothing at start-up), the
+      undo list (newest last) and the moves under way. }
+    FPanel: TSortPanel;
+    FMover: TFileMover;
+    FUndo: array of TUndoEntry;
+    FNextUndoId: Integer;
+    FNextJobId: Integer;
+    FJobsInFlight: Integer;      { copies / moves / deletes not reported yet }
+    FMoves: array of TMoveUnderWay;
+    FPanelPress: TPanelHit;      { where a button went down on the panel }
+    FPanelPressX, FPanelPressY: Integer;
+    { Copy / move need a double click on a button (user, Day 21: single
+      clicks sorted too easily): the first click of the pair. }
+    FSlotClickSlot: Integer;     { -1 = none }
+    FSlotClickButton: TOverlayButton;
+    FSlotClickMs: Double;
+    FSlotClickX, FSlotClickY: Integer;
+    FDoubleClickMs: Integer;
+    { A pasted or cropped image being saved into a sort folder (Day 21):
+      its slot (-1 = none) and whether it was a "move". }
+    FSortSaveSlot: Integer;
+    FSortSaveImage: IDecodedImage;   { ... the image (shown again if a "move" failed) }
+    FSortSaveTitle, FSortSavePrefix: string;
+    FSortSaveMove: Boolean;
+    { Pasted from the settings screen: the last session opens behind it
+      without replacing it. }
+    FKeepScratch: Boolean;
+    FPanelPressButton: TOverlayButton;
+    FPanelViewW, FPanelViewH: Integer;
+    FPanelScale: Double;
+    FOnSortMenu: TSortMenuEvent;
+    { Stage 2: the buttons' icons and the missing-folder check (read on
+      their own thread), and whether the panel was open at the last
+      UpdatePanel (opening reads the icon folder again). }
+    FIcons: TSortIcons;
+    FPanelWasVisible: Boolean;
+
     procedure ShowCurrent;
     procedure UpdateWanted;
     procedure SaveCurrentImage;
     procedure SaveImageOnly;
+    function ImageToSave: IDecodedImage;
+    procedure StartSave(const AImage: IDecodedImage; const AFileName, AFallbackDir: string);
     procedure PasteFromClipboard;
     procedure ShowScratch(const AImage: IDecodedImage; const ATitle, APrefix: string);
     procedure SetEditMode(AOn: Boolean);
@@ -358,6 +457,30 @@ type
     procedure UpdateInfo;
     procedure UpdateDiagnostics;
     procedure Refresh;
+    { Sorting }
+    function Mover: TFileMover;
+    procedure SyncPanelLayout;
+    procedure UpdatePanel;
+    procedure PanelClick(const AHit: TPanelHit; AButton: TOverlayButton);
+    function CanSortCurrent(out AFileName: string): Boolean;
+    procedure SortScratch(ASlot: Integer; AMove: Boolean);
+    procedure SortScratchSaved;
+    procedure OpenSlotFolder(ASlot: Integer);
+    function SecondSlotClick(ASlot: Integer; AButton: TOverlayButton): Boolean;
+    procedure QueueJob(var AJob: TFileJob);
+    procedure StartMove(var AJob: TFileJob);
+    procedure HandleFileJobDone(const AResult: TFileJobResult);
+    procedure AddUndo(const AJob: TFileJob; const APlaced: string);
+    function UndoIndex(AId: Integer): Integer;
+    function LastUndo: Integer;
+    procedure DeleteUndo(AIndex: Integer);
+    procedure SortNote(const AStatus, AFooter: string; ADurationMs: Double);
+    { Icons (stage 2). }
+    procedure RequestIcons(AForce: Boolean);
+    procedure HandleIconsChanged(Sender: TObject);
+    function PanelSlotIcon(ASlot, ASize: Integer): TBGRABitmap;
+    function PanelSlotMissing(ASlot: Integer): Boolean;
+    procedure HandleIconWritten(const AResult: TFileJobResult);
   public
     constructor Create;
     destructor Destroy; override;
@@ -413,9 +536,82 @@ type
       started without an image. The form does it (later, not inside the
       key handler). }
     property OnSettingsRequest: TNotifyEvent read FOnSettingsRequest write FOnSettingsRequest;
+
+    { "Save image as" (menu, Phase F): the form asks for a file name with
+      a save dialog. CanSaveImage: there is something to save (and no
+      save running). SaveAsSuggestion: the folder to start in and a file
+      name. SaveImageAs: writes the PNG (".png" is added if missing). }
+    function CanSaveImage: Boolean;
+    procedure SaveAsSuggestion(out ADirectory, AFileName: string);
+    procedure SaveImageAs(const AFileName: string);
+
+    { Sorting (Phase G, G1, spec §15). The surfaces offer every mouse
+      event to HandleOverlayMouse first (their OnOverlayMouse); True =
+      the panel took it. }
+    function HandleOverlayMouse(AKind: TOverlayMouseKind; AButton: TOverlayButton;
+      AX, AY, AWheel: Integer; AButtonDown, ADouble: Boolean): Boolean;
+    { Copy (AMove False) or move the current image into slot ASlot. }
+    procedure SortCurrent(ASlot: Integer; AMove: Boolean);
+    { Moves the current image into the deleted-files folder. MView never
+      really deletes. }
+    procedure DeleteCurrent;
+    { Takes back the newest copy / move / delete not yet taken back. }
+    procedure UndoLast;
+    { The menu's text for Undo; '' = nothing to take back. }
+    function UndoCaption: string;
+    { The panel opened by the menu or a key (stays until the mouse has
+      been on it), or closed. }
+    procedure ShowSortPanel(AShow: Boolean);
+    function SortPanelVisible: Boolean;
+    { The slots changed (the form's folder menu, a drop): save [Sort]
+      and redraw the panel. }
+    procedure SortFoldersChanged;
+    { The part of the panel at a point of the view (a drop). }
+    function SortPanelHit(AX, AY: Integer): TPanelHit;
+    { The window lost the focus / the mouse left: no hover, no edge timer. }
+    procedure SortPanelMouseGone;
+    { A note in the info line (the main form's window actions). }
+    procedure ShowNote(const AText: string; ADurationMs: Double);
+    { The settings screen's Ctrl+V with an image in the clipboard: the
+      viewer starts with it (the last session opens behind it). }
+    procedure StartWithPaste;
+    { Browse slot ASlot's folder (a swipe to the right over its button,
+      a wheel click on it, or its "..." menu). }
+    procedure OpenSortFolder(ASlot: Integer);
+    { A copy, move or delete (or undo) is waiting or running: shutting
+      down waits for the one running (the form allows it more time). }
+    function FileJobsBusy: Boolean;
+    { The folder a new slot's dialog starts in (slot folder, else the
+      parent of the last folder chosen, else the image's folder's parent,
+      else Documents). ASlot -1: a new slot. }
+    function SortStartFolder(ASlot: Integer): string;
+    property OnSortMenu: TSortMenuEvent read FOnSortMenu write FOnSortMenu;
+
+    { Icons (stage 2, spec §9.7). SlotIconFile: the icon file slot ASlot
+      uses: its own (Slot<n>Icon, a name in the icon folder or a full
+      path), else the one named like its folder (Good.ico / Good.png for
+      ...\Good) if the icon folder has it; '' = none (the coloured
+      folder; Slot<n>Icon=- asks for that). }
+    function SlotIconFile(ASlot: Integer): string;
+    { The icons read (the form's slot menu shows the icon folder's). }
+    property SortIcons: TSortIcons read FIcons;
+    { Read the icon folder again (after the form changed it). }
+    procedure ReloadIcons;
+    { "Make icon from this image": the edit-mode selection, else the
+      middle of what is on screen, as a square; 16 .. 256 px PNG
+      pictures in one .ico named after the current image's folder, into
+      the icon folder (an older one becomes <name>_previous.ico). }
+    function CanMakeIcon: Boolean;
+    procedure MakeIconFromImage;
   end;
 
 implementation
+
+uses
+  Forms,
+  FPWritePNG,
+  uMouseEngine,
+  uIconFile;
 
 const
   { Upper limit for skipping undecodable files in one go (only used
@@ -447,6 +643,10 @@ const
 
   { How long the zone's name stays on screen (mouse language). }
   ZoneLabelMs = 1500;
+
+  { Sort panel: a swipe to the right over a button opens its folder; at
+    least this far (px at 96 dpi). }
+  SwipePx = 40;
 
   NoStartMessage =
     'No image or folder given.   Start MView with:   MView.exe <image file or folder>';
@@ -509,6 +709,8 @@ begin
   FNoRoom.Free;
   FNoPreview.Free;
   FMouseProfile.Free;
+  FPanel.Free;
+  FIcons.Free;
   FConfig.Free;
   inherited Destroy;
 end;
@@ -516,6 +718,19 @@ end;
 procedure TMView.Shutdown;
 begin
   StopAnimation;
+
+  { The waits below run queued calls: an icon load delivered now must
+    not reach the panel (the view may be gone already). }
+  if Assigned(FIcons) then
+    FIcons.OnChanged := nil;
+
+  { A copy or move being done is finished (never half a file); those
+    not started yet are dropped: the files stay where they are. }
+  if Assigned(FMover) then
+  begin
+    FMover.OnDone := nil;
+    FreeAndNil(FMover);
+  end;
 
   { A save still running: let it finish (it only writes a file). }
   if Assigned(FSaveThread) then
@@ -611,11 +826,31 @@ begin
   { Folders come only from the scanner (Day 19). }
   FNavigator.ReadsDisk := False;
   FScanner := CreateScanner;
+
+  { The sort panel (Phase G): drawn only when it is open. }
+  FPanel := TSortPanel.Create(FConfig.SortFolders);
+  FPanel.EdgeDelayMs := FConfig.SortEdgeDelayMs;
+  FPanel.EdgeWidth := FConfig.SortEdgeWidth;
+  FPanel.Pinned := FConfig.SortPinned;
+  FPanel.FooterText := 'double-click:' + LineEnding + 'left = copy,  right = move';
+  FPanelPress.Part := ppNone;
+  FPanelPress.Slot := -1;
+  FSortSaveSlot := -1;
+  FSlotClickSlot := -1;
+  FDoubleClickMs := SystemDoubleClickMs;
+  { Icons: read when the panel first opens, not at start-up. }
+  FIcons := TSortIcons.Create;
+  FIcons.OnChanged := @HandleIconsChanged;
+  FPanel.OnSlotIcon := @PanelSlotIcon;
+  FPanel.OnSlotMissing := @PanelSlotMissing;
+  if FPanel.Pinned then
+    FPanel.Show;
 end;
 
 procedure TMView.AttachView(ASurface: TWinControl; ARenderer: TRenderer);
 begin
   FSurface := ASurface;
+  FPanelViewW := 0;    { the panel's layout follows the new surface }
   if (ARenderer = nil) or (ARenderer = FRenderer) then
     Exit;
   ARenderer.ZoomStepPercent := FRenderer.ZoomStepPercent;
@@ -628,6 +863,7 @@ begin
   ARenderer.SetMessage('');
   FRenderer.Free;
   FRenderer := ARenderer;
+  UpdatePanel;
 end;
 
 procedure TMView.SetDisplaySize(AWidth, AHeight: Integer);
@@ -664,6 +900,7 @@ end;
   here touches the disk (Day 19). }
 procedure TMView.OpenMedia(const APath: string; const ASelectFile: string);
 begin
+  FKeepScratch := False;   { StartWithPaste sets it again, after this }
   { The scanner is stuck in an earlier request: a new one wouldn't be
     looked at. }
   if FScanner.LastAliveAgeMs > ScannerStuckMs then
@@ -690,6 +927,8 @@ end;
 { UI thread: the scanner has resolved what to open and listed its
   folder. Takes ownership of AStart. }
 procedure TMView.HandleStartReady(AStart: TScanStart);
+var
+  I: Integer;
 begin
   try
     if AStart.Generation <> FScanGeneration then
@@ -697,17 +936,37 @@ begin
     ShowStatus('', 0);
     if not AStart.Found then
     begin
-      ShowMessageText('Not found:   ' + AStart.RequestedPath);
+      if FKeepScratch and FShowingPaste then
+        ShowStatus('not found: ' + AStart.RequestedPath, 6000)
+      else
+        ShowMessageText('Not found:   ' + AStart.RequestedPath);
+      FKeepScratch := False;
       Exit;
     end;
 
     FNavigator.OpenListed(AStart.Root, AStart.TargetDirectory, AStart.Listing,
       AStart.TargetFile);
+    { Moves still under way (sorting): listed before they happened. }
+    for I := 0 to High(FMoves) do
+      FNavigator.RemoveFile(FMoves[I].Source);
     FConfig.LastDirectory := FNavigator.RootDirectory;
     FLastStep := cmdNextImage;
     FSkipCount := 0;
     FSkipStartFile := FNavigator.CurrentFileName;
-    ShowCurrent;
+    { Pasted on the settings screen: the image stays; the files are
+      there for the next step. }
+    if FKeepScratch and FShowingPaste then
+    begin
+      FKeepScratch := False;
+      UpdateWanted;
+      UpdateInfo;
+      Refresh;
+    end
+    else
+    begin
+      FKeepScratch := False;
+      ShowCurrent;
+    end;
   finally
     AStart.Free;
   end;
@@ -1196,13 +1455,14 @@ begin
     Exit;
   end;
 
-  { The scanner may have chosen another root. }
-  if FNavigator.SetTree(ATree) then
+  { The scanner may have chosen another root. A pasted or cropped image
+    on screen stays. }
+  if FNavigator.SetTree(ATree) and not FShowingPaste then
   begin
     FConfig.LastDirectory := FNavigator.RootDirectory;
     ShowCurrent;                { an empty start folder moved on }
   end
-  else if not FNavigator.HasCurrentImage then
+  else if (not FNavigator.HasCurrentImage) and not FShowingPaste then
     ShowCurrent                 { still nothing: "No images found" }
   else
   begin
@@ -1469,6 +1729,21 @@ begin
     cmdShowMenu:
       ;   { the main form shows it }
 
+    cmdSortPanel:
+      ShowSortPanel(not SortPanelVisible);
+    cmdDeleteImage:
+      begin
+        DeleteCurrent;
+        Exit;
+      end;
+    cmdUndo:
+      begin
+        UndoLast;
+        Exit;
+      end;
+    cmdSideBySide:
+      ;   { the main form does it (windows are its business) }
+
     cmdExit:
       begin
         if Assigned(FOnExitRequest) then
@@ -1492,9 +1767,24 @@ begin
   Refresh;
 end;
 
+{ The size in the file (the full image), not of a quick view. }
+function ImageWidth(const AImage: IDecodedImage): Integer;
+begin
+  Result := AImage.FullWidth;
+  if Result <= 0 then
+    Result := AImage.Width;
+end;
+
+function ImageHeight(const AImage: IDecodedImage): Integer;
+begin
+  Result := AImage.FullHeight;
+  if Result <= 0 then
+    Result := AImage.Height;
+end;
+
 procedure TMView.UpdateInfo;
 var
-  Text: string;
+  Text, FileName: string;
 begin
   { A pasted image (also when no file is open). }
   if FShowingPaste and Assigned(FCurrentImage) then
@@ -1516,8 +1806,15 @@ begin
     Exit;
   end;
 
-  Text := Format('%s     %d / %d', [FNavigator.CurrentFileName,
-    FNavigator.CurrentIndex + 1, FNavigator.ImageCount]);
+  { Name, size (once the image is there), folder, then the rest
+    (user, Phase F). }
+  FileName := FNavigator.CurrentFileName;
+  Text := ExtractFileName(FileName);
+  if Assigned(FCurrentImage) and not FCurrentImage.IsError
+    and SameText(FCurrentImage.Key.FileName, FileName) then
+    Text := Text + Format('     %d x %d', [ImageWidth(FCurrentImage), ImageHeight(FCurrentImage)]);
+  Text := Text + '     ' + ExtractFileDir(FileName);
+  Text := Text + Format('     %d / %d', [FNavigator.CurrentIndex + 1, FNavigator.ImageCount]);
 
   if FNavigator.SortMode in [smFileNameAscending, smFileNameDescending] then
     Text := Text + '     by name'
@@ -2023,12 +2320,15 @@ begin
   Refresh;
 end;
 
-{ Esc (Back), hard-wired (user, 2026-09-27): edit mode ends first;
+{ Esc (Back), hard-wired (user, 2026-09-27): an open sort panel closes
+  first (Phase G), then edit mode ends;
   otherwise back to the settings editor (the start screen). Only there
   does Esc end MView. (A zoom / rotate mode is ended by the engine.) }
 procedure TMView.GoBack;
 begin
-  if FEditMode then
+  if Assigned(FPanel) and FPanel.Visible then
+    ShowSortPanel(False)
+  else if FEditMode then
     SetEditMode(False)
   else if Assigned(FOnSettingsRequest) then
     FOnSettingsRequest(Self)
@@ -2037,40 +2337,106 @@ begin
 end;
 
 { "Save image": the image as PNG into the save folder (Documents the
-  first time, see TConfig.SaveDirectory). The best version in memory:
-  the full image if it is there. }
+  first time, see TConfig.SaveDirectory). If that folder can't be used
+  (a wrong path in MView.ini, a missing drive), the file goes to the
+  Documents folder instead and the status line says so (Day 20). }
 procedure TMView.SaveImageOnly;
 var
   Img: IDecodedImage;
-  Dir, FileName: string;
+  FileName: string;
 begin
   if Assigned(FSaveThread) then
   begin
     ShowStatus('still saving the previous image ...', 3000);
     Exit;
   end;
-  if (FCurrentImage = nil) or FCurrentImage.IsError then
+  Img := ImageToSave;
+  if Img = nil then
   begin
     ShowStatus('nothing to save', 3000);
     Exit;
   end;
-  Dir := FConfig.SaveDirectory;
   if FShowingPaste then
-  begin
-    Img := FCurrentImage;
-    FileName := Dir + FScratchPrefix + '_' + FormatDateTime('yyyymmdd-hhnnss', Now) + '.png';
-    FSavingPaste := True;
-  end
+    FileName := FConfig.SaveDirectory + FScratchPrefix + '_'
+      + FormatDateTime('yyyymmdd-hhnnss', Now) + '.png'
   else
+    FileName := SavedImageFileName(FConfig.SaveDirectory, Img);
+  StartSave(Img, FileName, UserDocumentsDirectory);
+end;
+
+{ The best version in memory of what is shown: the full image if it is
+  there; a pasted or cropped image as it is. nil: nothing to save. }
+function TMView.ImageToSave: IDecodedImage;
+begin
+  Result := nil;
+  if (FCurrentImage = nil) or FCurrentImage.IsError then
+    Exit;
+  if FShowingPaste then
+    Exit(FCurrentImage);
+  Result := FCache.Get(FCurrentImage.Key);
+  if (Result = nil) or Result.IsError or (Result.Quality < FCurrentImage.Quality) then
+    Result := FCurrentImage;
+end;
+
+{ AFallbackDir: where the file goes if its folder can't be used; '' =
+  nowhere (Save as: the user chose that folder, so say it failed). }
+procedure TMView.StartSave(const AImage: IDecodedImage; const AFileName, AFallbackDir: string);
+begin
+  FSavingPaste := FShowingPaste;
+  FSaveThread := TImageSaveThread.Create(AImage, AFileName, AFallbackDir);
+  ShowStatus('saving ' + ExtractFileName(AFileName) + ' ...', 0);
+end;
+
+function TMView.CanSaveImage: Boolean;
+begin
+  Result := (FSaveThread = nil) and (ImageToSave <> nil);
+end;
+
+procedure TMView.SaveAsSuggestion(out ADirectory, AFileName: string);
+begin
+  { Not FConfig.SaveDirectory: that writes MView.ini the first time,
+    and a dialog that is cancelled should change nothing. }
+  if FSaveAsDir <> '' then
+    ADirectory := FSaveAsDir
+  else if Trim(FConfig.SaveImageDirectory) <> '' then
+    ADirectory := IncludeTrailingPathDelimiter(Trim(FConfig.SaveImageDirectory))
+  else
+    ADirectory := UserDocumentsDirectory;
+  if FShowingPaste then
+    AFileName := FScratchPrefix + '_' + FormatDateTime('yyyymmdd-hhnnss', Now) + '.png'
+  else if Assigned(FCurrentImage) then
+    AFileName := ChangeFileExt(ExtractFileName(FCurrentImage.Key.FileName), '.png')
+  else
+    AFileName := 'image.png';
+end;
+
+procedure TMView.SaveImageAs(const AFileName: string);
+var
+  Img: IDecodedImage;
+  FileName, Ext: string;
+begin
+  if Assigned(FSaveThread) then
   begin
-    Img := FCache.Get(FCurrentImage.Key);
-    if (Img = nil) or Img.IsError or (Img.Quality < FCurrentImage.Quality) then
-      Img := FCurrentImage;
-    FileName := SavedImageFileName(Dir, Img);
-    FSavingPaste := False;
+    ShowStatus('still saving the previous image ...', 3000);
+    Exit;
   end;
-  FSaveThread := TImageSaveThread.Create(Img, FileName);
-  ShowStatus('saving ' + ExtractFileName(FileName) + ' ...', 0);
+  Img := ImageToSave;
+  if (Img = nil) or (Trim(AFileName) = '') then
+  begin
+    ShowStatus('nothing to save', 3000);
+    Exit;
+  end;
+  { MView writes PNG only: the name says so ("cell.jpg" -> "cell.png";
+    another ending, e.g. "cell.v2", is kept: "cell.v2.png"). }
+  FileName := AFileName;
+  Ext := LowerCase(ExtractFileExt(FileName));
+  if (Ext = '.jpg') or (Ext = '.jpeg') or (Ext = '.jpe') or (Ext = '.tif')
+    or (Ext = '.tiff') or (Ext = '.bmp') or (Ext = '.gif') then
+    FileName := ChangeFileExt(FileName, '.png')
+  else if Ext <> '.png' then
+    FileName := FileName + '.png';
+  FSaveAsDir := IncludeTrailingPathDelimiter(ExtractFileDir(FileName));
+  StartSave(Img, FileName, '');
 end;
 
 { One line per displayed image in timing.csv next to MView.exe.
@@ -2165,7 +2531,7 @@ begin
     Img := FCurrentImage;
 
   FSaveThread := TImageSaveThread.Create(Img,
-    SavedImageFileName(FConfig.SaveDirectory, Img));
+    SavedImageFileName(FConfig.SaveDirectory, Img), UserDocumentsDirectory);
   FSavingPaste := False;
   FRenderer.RequestScreenshot(SavedViewFileName(FConfig.SaveDirectory, Img));
   ShowStatus('saving ' + ExtractFileName(FSaveThread.FileName) + ' ...', 0);
@@ -2207,9 +2573,11 @@ begin
       ShowStatus(FSaveThread.ResultText, 8000);
     FViewNote := '';
     { A pasted image: the info line says where it went. }
-    if FSavingPaste and (Pos('saved', FSaveThread.ResultText) = 1) then
-      FPasteSavedAs := FSaveThread.FileName;
+    if FSavingPaste and (FSaveThread.SavedFileName <> '') then
+      FPasteSavedAs := FSaveThread.SavedFileName;
     FSavingPaste := False;
+    if FSortSaveSlot >= 0 then
+      SortScratchSaved;
     FreeAndNil(FSaveThread);
     UpdateInfo;
   end;
@@ -2254,6 +2622,15 @@ begin
   begin
     FLastStuckCheckMs := NowMs;
     CheckStuckReads;
+  end;
+
+  { The sort panel: follows the view's size; opens at the edge, closes
+    when the mouse has left it (unpinned). }
+  if Assigned(FPanel) then
+  begin
+    SyncPanelLayout;
+    if FPanel.Tick(NowMs) then
+      UpdatePanel;
   end;
 
   { The pause before the full-size decode is over. }
@@ -2331,6 +2708,1143 @@ procedure TMView.Refresh;
 begin
   if Assigned(FSurface) then
     FSurface.Invalidate;
+end;
+
+{ ---- Sorting (Phase G, G1) ------------------------------------------- }
+
+const
+  MaxUndoEntries = 50;
+  SortNoteMs = 5000;
+
+function TMView.Mover: TFileMover;
+begin
+  if FMover = nil then
+  begin
+    FMover := TFileMover.Create(ExtractFilePath(ParamStr(0)) + 'sorting.log');
+    FMover.OnDone := @HandleFileJobDone;
+  end;
+  Result := FMover;
+end;
+
+{ The panel's layout follows the view (elastic): checked on the timer
+  and before mouse events, laid out again only when the size changed. }
+procedure TMView.SyncPanelLayout;
+var
+  W, H: Integer;
+  Scale: Double;
+begin
+  if (FPanel = nil) or (FSurface = nil) then
+    Exit;
+  W := FSurface.ClientWidth;
+  H := FSurface.ClientHeight;
+  Scale := Screen.PixelsPerInch / 96;
+  if (W = FPanelViewW) and (H = FPanelViewH) and (Scale = FPanelScale) then
+    Exit;
+  FPanelViewW := W;
+  FPanelViewH := H;
+  FPanelScale := Scale;
+  FPanel.SetViewSize(W, H, Scale);
+  UpdatePanel;
+end;
+
+{ Hands the panel's picture (or none, while closed) to the renderer. }
+procedure TMView.UpdatePanel;
+var
+  Bmp: TBGRABitmap;
+begin
+  if FPanel = nil then
+    Exit;
+  { The panel has just opened: the icon folder and the sort folders are
+    looked at again (a new icon, a folder made meanwhile). }
+  if FPanel.Visible and not FPanelWasVisible then
+    RequestIcons(False);
+  FPanelWasVisible := FPanel.Visible;
+  Bmp := FPanel.Bitmap;
+  if Bmp = nil then
+    FRenderer.SetPanel(nil, 0, 0, 0)
+  else
+    FRenderer.SetPanel(Bmp, FPanel.Left, FPanel.Top, FPanel.Version);
+  Refresh;
+end;
+
+function TMView.HandleOverlayMouse(AKind: TOverlayMouseKind; AButton: TOverlayButton;
+  AX, AY, AWheel: Integer; AButtonDown, ADouble: Boolean): Boolean;
+var
+  Hit: TPanelHit;
+  Notches: Integer;
+begin
+  Result := False;
+  if FPanel = nil then
+    Exit;
+  SyncPanelLayout;
+  case AKind of
+    omMove:
+      if FPanel.NoteMouse(AX, AY, AButtonDown, NowMs) then
+        UpdatePanel;
+
+    omLeave:
+      begin
+        FPanel.MouseGone(NowMs);
+        if FPanel.Visible then
+          UpdatePanel;
+      end;
+
+    omWheel:
+      if FPanel.Contains(AX, AY) then
+      begin
+        Result := True;
+        Notches := AWheel div 120;
+        if Notches = 0 then
+          Notches := Sign(AWheel);
+        if FPanel.Scroll(Notches) then
+          UpdatePanel;
+      end;
+
+    omDown:
+      if FPanel.Contains(AX, AY) then
+      begin
+        Result := True;
+        FPanelPress := FPanel.HitTest(AX, AY);
+        FPanelPressButton := AButton;
+        FPanelPressX := AX;
+        FPanelPressY := AY;
+      end;
+
+    omUp:
+      begin
+        Result := True;
+        { A swipe to the right over a button: into its folder (Day 21,
+          user). Else it acts on release, where it was pressed (like a
+          button). }
+        Hit := FPanel.HitTest(AX, AY);
+        if (FPanelPress.Part in [ppSlot, ppSlotMenu])
+          and (AX - FPanelPressX >= Round(SwipePx * Max(1.0, FPanelScale)))
+          and (Abs(AY - FPanelPressY) < AX - FPanelPressX) then
+          OpenSlotFolder(FPanelPress.Slot)
+        else if (FPanelPress.Part <> ppNone) and (Hit.Part = FPanelPress.Part)
+          and (Hit.Slot = FPanelPress.Slot) then
+          PanelClick(Hit, FPanelPressButton);
+        FPanelPress.Part := ppNone;
+        FPanelPress.Slot := -1;
+      end;
+  end;
+end;
+
+procedure TMView.PanelClick(const AHit: TPanelHit; AButton: TOverlayButton);
+var
+  P: TPoint;
+begin
+  case AHit.Part of
+    ppSlot:
+      if AButton = obMiddle then
+        OpenSlotFolder(AHit.Slot)          { wheel click: into the folder }
+      else if (AButton in [obLeft, obRight]) and not SecondSlotClick(AHit.Slot, AButton) then
+      begin
+        { The first click only says what a double click does. }
+        FPanel.FooterText := 'double-click:' + LineEnding + 'left = copy,  right = move';
+        UpdatePanel;
+      end
+      else if AButton in [obLeft, obRight] then
+      begin
+        SortCurrent(AHit.Slot, AButton = obRight);
+        { Unpinned: closes after each action (user), once its flash has
+          been seen. }
+        FPanel.CloseAfterAction(NowMs);
+        UpdatePanel;
+      end;
+
+    ppSlotMenu, ppAdd:
+      if Assigned(FOnSortMenu) and Assigned(FSurface) then
+      begin
+        P := FSurface.ClientToScreen(Point(FPanel.Left, 0));
+        P.Y := Mouse.CursorPos.Y;
+        if AHit.Part = ppAdd then
+          FOnSortMenu(-1, P)
+        else
+          FOnSortMenu(AHit.Slot, P);
+      end;
+
+    ppPin:
+      begin
+        FPanel.Pinned := not FPanel.Pinned;
+        FConfig.SortPinned := FPanel.Pinned;
+        FConfig.SaveSort;
+        UpdatePanel;
+      end;
+
+    ppFooter:
+      UndoLast;
+  end;
+end;
+
+{ The file shown can be sorted: a file (not a pasted or cropped image). }
+{ A click on a button (released there): True if it is the second of a
+  double click (same button, same mouse button, within the system's
+  double-click time, hardly moved); then the pair is used up. Otherwise
+  it is remembered as a first click. }
+function TMView.SecondSlotClick(ASlot: Integer; AButton: TOverlayButton): Boolean;
+var
+  NowTime: Double;
+  Near: Integer;
+begin
+  NowTime := NowMs;
+  Near := Round(6 * Max(1.0, FPanelScale));
+  Result := (FSlotClickSlot = ASlot) and (FSlotClickButton = AButton)
+    and (NowTime - FSlotClickMs <= FDoubleClickMs)
+    and (Abs(FPanelPressX - FSlotClickX) <= Near) and (Abs(FPanelPressY - FSlotClickY) <= Near);
+  if Result then
+    FSlotClickSlot := -1
+  else
+  begin
+    FSlotClickSlot := ASlot;
+    FSlotClickButton := AButton;
+    FSlotClickMs := NowTime;
+    FSlotClickX := FPanelPressX;
+    FSlotClickY := FPanelPressY;
+  end;
+end;
+
+{ Into slot ASlot's folder, from the panel (closes it, unpinned). }
+procedure TMView.OpenSlotFolder(ASlot: Integer);
+begin
+  OpenSortFolder(ASlot);
+  if Assigned(FPanel) then
+  begin
+    FPanel.CloseAfterAction(NowMs);
+    UpdatePanel;
+  end;
+end;
+
+procedure TMView.OpenSortFolder(ASlot: Integer);
+var
+  Slot: TSortSlot;
+begin
+  if (ASlot < 0) or (ASlot >= FConfig.SortFolders.Count) then
+    Exit;
+  Slot := FConfig.SortFolders.Slot(ASlot);
+  if Assigned(FPanel) then
+  begin
+    { A folder known to be missing: red, nothing opened. }
+    if PanelSlotMissing(ASlot) then
+    begin
+      FPanel.Flash(ASlot, False, NowMs);
+      SortNote('folder not found: ' + Slot.Folder, 'folder not found', SortNoteMs);
+      Exit;
+    end;
+    FPanel.Flash(ASlot, True, NowMs);
+  end;
+  { The scanner says "Not found" if it has gone meanwhile. }
+  OpenMedia(Slot.Folder);
+  if FShowingPaste and (FPasteSavedAs = '') then
+    SortNote('opening ' + Slot.Folder + ' ...   (the pasted / cropped image was not saved)',
+      'opened ' + Slot.Name, 8000)
+  else
+    SortNote('opening ' + Slot.Folder + ' ...', 'opened ' + Slot.Name, SortNoteMs);
+end;
+
+function TMView.CanSortCurrent(out AFileName: string): Boolean;
+begin
+  AFileName := '';
+  if FShowingPaste then
+  begin
+    ShowStatus('a pasted or cropped image is not a file yet: save it first', 5000);
+    Exit(False);
+  end;
+  if not FNavigator.HasCurrentImage then
+  begin
+    ShowStatus('no image to sort', 3000);
+    Exit(False);
+  end;
+  AFileName := FNavigator.CurrentFileName;
+  Result := True;
+end;
+
+{ Status line and panel footer together. }
+procedure TMView.SortNote(const AStatus, AFooter: string; ADurationMs: Double);
+begin
+  if Assigned(FPanel) then
+  begin
+    FPanel.FooterText := AFooter;
+    FPanel.Busy := Assigned(FMover) and FMover.Busy;
+  end;
+  ShowStatus(AStatus, ADurationMs);
+  UpdatePanel;
+end;
+
+{ A move: the file leaves the lists at once and the next image shows
+  (no waiting for the disk); it comes back if the move fails. }
+{ Every job gets a number (to match its result); copies, moves and
+  deletes are counted until reported (Undo waits for them). }
+procedure TMView.QueueJob(var AJob: TFileJob);
+begin
+  Inc(FNextJobId);
+  AJob.Id := FNextJobId;
+  if AJob.Kind in [fjSort, fjDelete] then
+    Inc(FJobsInFlight);
+  Mover.Add(AJob);
+end;
+
+procedure TMView.StartMove(var AJob: TFileJob);
+var
+  M: TMoveUnderWay;
+begin
+  M.Source := AJob.Source;
+  if not FNavigator.ListedKey(AJob.Source, M.Key) then
+  begin
+    M.Key.FileName := AJob.Source;
+    M.Key.FileSize := 0;
+    M.Key.FileTime := 0;
+  end;
+  StopAnimation;
+  FNavigator.RemoveFile(AJob.Source);
+  FCache.DropFile(AJob.Source);
+  M.FollowedBy := FNavigator.CurrentFileName;
+  QueueJob(AJob);
+  M.JobId := AJob.Id;
+  SetLength(FMoves, Length(FMoves) + 1);
+  FMoves[High(FMoves)] := M;
+  ShowCurrent;
+end;
+
+procedure TMView.SortCurrent(ASlot: Integer; AMove: Boolean);
+var
+  FileName, Verb: string;
+  Slot: TSortSlot;
+  Job: TFileJob;
+begin
+  if (FPanel = nil) or (ASlot < 0) or (ASlot >= FConfig.SortFolders.Count) then
+    Exit;
+  { A pasted or cropped image: saved into the folder (Day 21, user). }
+  if FShowingPaste then
+  begin
+    SortScratch(ASlot, AMove);
+    Exit;
+  end;
+  if not CanSortCurrent(FileName) then
+  begin
+    FPanel.Flash(ASlot, False, NowMs);
+    UpdatePanel;
+    Exit;
+  end;
+  Slot := FConfig.SortFolders.Slot(ASlot);
+  if SameText(ExcludeTrailingPathDelimiter(ExtractFileDir(FileName)), Slot.Folder) then
+  begin
+    FPanel.Flash(ASlot, False, NowMs);
+    SortNote(ExtractFileName(FileName) + ' is already in ' + Slot.Name,
+      'already in ' + Slot.Name, SortNoteMs);
+    Exit;
+  end;
+
+  Job := Default(TFileJob);
+  if AMove then
+    Job.Action := faMove
+  else
+    Job.Action := faCopy;
+  Job.Kind := fjSort;
+  Job.Source := FileName;
+  Job.TargetDir := Slot.Folder;
+  Job.CreateTarget := False;   { a missing folder is reported, not made }
+  Job.Slot := ASlot;
+  Job.Caption := Slot.Name;
+  Job.UndoOf := -1;
+
+  FPanel.JobStarted(ASlot);
+  if AMove then
+  begin
+    Verb := 'moving';
+    StartMove(Job);
+  end
+  else
+  begin
+    Verb := 'copying';
+    QueueJob(Job);
+  end;
+  SortNote(Verb + ' ' + ExtractFileName(FileName) + ' to ' + Slot.Name + ' ...',
+    Verb + ' to ' + Slot.Name + ' ...', 0);
+end;
+
+procedure TMView.DeleteCurrent;
+var
+  FileName: string;
+  Job: TFileJob;
+begin
+  { A pasted or cropped image is no file: "deleting" it closes it. }
+  if FShowingPaste then
+  begin
+    ShowStatus('closed the pasted / cropped image (it was not saved)', 5000);
+    ShowCurrent;
+    Exit;
+  end;
+  if not CanSortCurrent(FileName) then
+    Exit;
+  if SameText(ExcludeTrailingPathDelimiter(ExtractFileDir(FileName)),
+    ExcludeTrailingPathDelimiter(FConfig.DeletedFilesFolder)) then
+  begin
+    SortNote(ExtractFileName(FileName) + ' is in the deleted-files folder already',
+      'already deleted', SortNoteMs);
+    Exit;
+  end;
+  Job := Default(TFileJob);
+  Job.Action := faMove;
+  Job.Kind := fjDelete;
+  Job.Source := FileName;
+  Job.TargetDir := FConfig.DeletedFilesFolder;
+  Job.CreateTarget := True;
+  Job.Slot := -1;
+  Job.Caption := FolderDisplayName(Job.TargetDir);
+  Job.UndoOf := -1;
+  StartMove(Job);
+  SortNote('deleting ' + ExtractFileName(FileName) + ' ...', 'deleting ...', 0);
+end;
+
+function TMView.UndoIndex(AId: Integer): Integer;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FUndo) do
+    if FUndo[I].Id = AId then
+      Exit(I);
+  Result := -1;
+end;
+
+{ The newest entry whose undo is not already under way; -1 = none. }
+function TMView.LastUndo: Integer;
+var
+  I: Integer;
+begin
+  for I := High(FUndo) downto 0 do
+    if not FUndo[I].Pending then
+      Exit(I);
+  Result := -1;
+end;
+
+procedure TMView.DeleteUndo(AIndex: Integer);
+var
+  I: Integer;
+begin
+  if (AIndex < 0) or (AIndex > High(FUndo)) then
+    Exit;
+  for I := AIndex to High(FUndo) - 1 do
+    FUndo[I] := FUndo[I + 1];
+  SetLength(FUndo, Length(FUndo) - 1);
+end;
+
+procedure TMView.AddUndo(const AJob: TFileJob; const APlaced: string);
+var
+  E: TUndoEntry;
+begin
+  Inc(FNextUndoId);
+  E.Id := FNextUndoId;
+  E.Kind := AJob.Kind;
+  E.Action := AJob.Action;
+  E.Original := AJob.Source;
+  E.Placed := APlaced;
+  E.Caption := AJob.Caption;
+  E.Pending := False;
+  if Length(FUndo) >= MaxUndoEntries then
+    DeleteUndo(0);
+  SetLength(FUndo, Length(FUndo) + 1);
+  FUndo[High(FUndo)] := E;
+end;
+
+function TMView.UndoCaption: string;
+var
+  I: Integer;
+begin
+  Result := '';
+  I := LastUndo;
+  if I < 0 then
+    Exit;
+  case FUndo[I].Kind of
+    fjDelete: Result := 'Undo delete of ' + ExtractFileName(FUndo[I].Original);
+  else
+    if FUndo[I].Action = faCopy then
+      Result := 'Undo copy of ' + ExtractFileName(FUndo[I].Original) + ' to ' + FUndo[I].Caption
+    else
+      Result := 'Undo move of ' + ExtractFileName(FUndo[I].Original) + ' to ' + FUndo[I].Caption;
+  end;
+end;
+
+{ Undo, never a real delete: a copy goes into the deleted-files folder;
+  a moved or deleted file goes back to its folder (under its old name,
+  or with _1 if that is taken now). }
+procedure TMView.UndoLast;
+var
+  I: Integer;
+  Job: TFileJob;
+begin
+  { A copy / move still under way would be the one to take back: wait
+    for it. }
+  if FJobsInFlight > 0 then
+  begin
+    SortNote('still copying / moving: undo when it is done', 'still working ...', 3000);
+    Exit;
+  end;
+  I := LastUndo;
+  if I < 0 then
+  begin
+    SortNote('nothing to undo', 'nothing to undo', 3000);
+    Exit;
+  end;
+  Job := Default(TFileJob);
+  Job.Action := faMove;
+  Job.Kind := fjUndo;
+  Job.Source := FUndo[I].Placed;
+  Job.Slot := -1;
+  Job.Caption := FUndo[I].Caption;
+  Job.UndoOf := FUndo[I].Id;
+  Job.CreateTarget := True;
+  if FUndo[I].Action = faCopy then
+    Job.TargetDir := FConfig.DeletedFilesFolder
+  else
+  begin
+    Job.TargetDir := ExtractFileDir(FUndo[I].Original);
+    Job.TargetName := ExtractFileName(FUndo[I].Original);
+  end;
+  FUndo[I].Pending := True;
+  QueueJob(Job);
+  SortNote('undoing ...', 'undoing ...', 0);
+end;
+
+{ UI thread: a job of the mover is done. }
+procedure TMView.HandleFileJobDone(const AResult: TFileJobResult);
+var
+  J, AsCopy: TFileJob;
+  Name, Status, Footer, NewName, DeletedDir: string;
+  I, U: Integer;
+  M: TMoveUnderWay;
+  Entry: TUndoEntry;
+  HadMove, Changed, BackHome: Boolean;
+begin
+  J := AResult.Job;
+  if J.Kind = fjIcon then
+  begin
+    HandleIconWritten(AResult);
+    Exit;
+  end;
+  Name := ExtractFileName(J.Source);
+  Changed := False;
+  if (J.Kind in [fjSort, fjDelete]) and (FJobsInFlight > 0) then
+    Dec(FJobsInFlight);
+
+  { This job's move under way (matched by its number): done now. }
+  HadMove := False;
+  M := Default(TMoveUnderWay);
+  for I := 0 to High(FMoves) do
+    if FMoves[I].JobId = J.Id then
+    begin
+      M := FMoves[I];
+      HadMove := True;
+      for U := I to High(FMoves) - 1 do
+        FMoves[U] := FMoves[U + 1];
+      SetLength(FMoves, Length(FMoves) - 1);
+      Break;
+    end;
+
+  NewName := '';
+  if AResult.OK and not SameText(ExtractFileName(AResult.ResultFile), Name)
+    and (J.Kind <> fjUndo) then
+    NewName := ' as ' + ExtractFileName(AResult.ResultFile);
+
+  if J.Kind in [fjSort, fjDelete] then
+  begin
+    if AResult.OK then
+      { Into a folder that is browsed too: it shows up there. }
+      FNavigator.AddFile(AResult.ResultFile, AResult.Size, AResult.Modified);
+
+    if AResult.OK and AResult.KeptSource and (J.Kind = fjDelete) then
+    begin
+      { A delete that only copied: the file is still there (in use).
+        Nothing to undo; the extra copy in the deleted-files folder is
+        harmless. }
+      if HadMove then
+      begin
+        FNavigator.AddFile(M.Key.FileName, M.Key.FileSize, M.Key.FileTime);
+        if SameText(FNavigator.CurrentFileName, M.FollowedBy)
+          and FNavigator.SelectFile(M.Key.FileName) then
+          Changed := True;
+      end;
+      Status := 'could not delete ' + Name + ': it is in use (a copy went into '
+        + J.TargetDir + ')';
+      Footer := 'not deleted:' + LineEnding + 'in use';
+    end
+    else if AResult.OK and AResult.KeptSource then
+    begin
+      { Moved to another drive, but the original was in use and stays:
+        it is a copy. The original is listed again. }
+      if HadMove then
+      begin
+        FNavigator.AddFile(M.Key.FileName, M.Key.FileSize, M.Key.FileTime);
+        if SameText(FNavigator.CurrentFileName, M.FollowedBy)
+          and FNavigator.SelectFile(M.Key.FileName) then
+          Changed := True;
+      end;
+      AsCopy := J;
+      AsCopy.Action := faCopy;
+      AddUndo(AsCopy, AResult.ResultFile);
+      Status := 'copied ' + Name + ' to ' + J.Caption + NewName
+        + ', but the original could not be removed (in use)';
+      Footer := 'copied only (in use)' + LineEnding + 'click here: undo';
+    end
+    else if AResult.OK then
+    begin
+      AddUndo(J, AResult.ResultFile);
+      if J.Kind = fjDelete then
+      begin
+        Status := 'deleted ' + Name + ' (moved to ' + J.TargetDir + ')';
+        Footer := 'deleted ' + Name;
+      end
+      else if J.Action = faCopy then
+      begin
+        Status := 'copied ' + Name + ' to ' + J.Caption + NewName;
+        Footer := 'copied to ' + J.Caption;
+      end
+      else
+      begin
+        Status := 'moved ' + Name + ' to ' + J.Caption + NewName;
+        Footer := 'moved to ' + J.Caption;
+      end;
+      Footer := Footer + LineEnding + 'click here: undo';
+    end
+    else
+    begin
+      { The move failed: the file is back in the lists; still where it
+        was if the user hasn't gone on. }
+      if HadMove then
+      begin
+        FNavigator.AddFile(M.Key.FileName, M.Key.FileSize, M.Key.FileTime);
+        if SameText(FNavigator.CurrentFileName, M.FollowedBy)
+          and FNavigator.SelectFile(M.Key.FileName) then
+          Changed := True;
+      end;
+      if J.Kind = fjDelete then
+        Status := 'could not delete ' + Name + ': ' + AResult.Message
+      else if J.Action = faCopy then
+        Status := 'could not copy ' + Name + ' to ' + J.Caption + ': ' + AResult.Message
+      else
+        Status := 'could not move ' + Name + ' to ' + J.Caption + ': ' + AResult.Message;
+      Footer := 'failed:' + LineEnding + AResult.Message;
+    end;
+  end
+  else
+  begin
+    { Undo. What was taken back decides what follows: a copy went into
+      the deleted-files folder, a moved or deleted file is back home. }
+    U := UndoIndex(J.UndoOf);
+    BackHome := True;
+    if U >= 0 then
+    begin
+      Entry := FUndo[U];
+      BackHome := Entry.Action = faMove;
+    end;
+    if AResult.OK then
+    begin
+      if U >= 0 then
+        DeleteUndo(U);
+      { The copy / the moved file left its place ... }
+      if FNavigator.RemoveFile(J.Source) then
+        Changed := True;
+      FCache.DropFile(J.Source);
+      { ... and is where it goes now (shown again if that is the folder
+        being browsed). }
+      FNavigator.AddFile(AResult.ResultFile, AResult.Size, AResult.Modified);
+      if BackHome and FNavigator.SelectFile(AResult.ResultFile) then
+        Changed := True;
+      if BackHome then
+        Status := 'undone: ' + ExtractFileName(AResult.ResultFile) + ' is back in '
+          + ExtractFileDir(AResult.ResultFile)
+      else
+      begin
+        DeletedDir := ExtractFileDir(AResult.ResultFile);
+        Status := 'undone: the copy ' + Name + ' went into ' + DeletedDir;
+      end;
+      if AResult.KeptSource then
+        Status := Status + ' (the other one could not be removed: in use)';
+      Footer := 'undone';
+    end
+    else
+    begin
+      if U >= 0 then
+        FUndo[U].Pending := False;
+      Status := 'could not undo: ' + AResult.Message;
+      Footer := 'undo failed:' + LineEnding + AResult.Message;
+    end;
+  end;
+
+  { The confirmation: the button flashes in its colour (red: failed);
+    delete and undo: the bottom line. }
+  if Assigned(FPanel) then
+  begin
+    if J.Kind = fjSort then
+      FPanel.JobDone(J.Slot, AResult.OK, NowMs)
+    else
+      FPanel.JobDone(-1, AResult.OK and not ((J.Kind = fjDelete) and AResult.KeptSource), NowMs);
+  end;
+
+  if Changed then
+    ShowCurrent
+  else
+    UpdateInfo;
+  if AResult.OK then
+    SortNote(Status, Footer, SortNoteMs)
+  else
+    SortNote(Status, Footer, 10000);
+end;
+
+procedure TMView.ShowSortPanel(AShow: Boolean);
+begin
+  if FPanel = nil then
+    Exit;
+  SyncPanelLayout;
+  if AShow then
+    FPanel.Show(True)
+  else
+    FPanel.Hide;
+  UpdatePanel;
+end;
+
+function TMView.SortPanelVisible: Boolean;
+begin
+  Result := Assigned(FPanel) and FPanel.Visible;
+end;
+
+procedure TMView.SortFoldersChanged;
+begin
+  FConfig.SaveSort;
+  RequestIcons(True);
+  if Assigned(FPanel) then
+  begin
+    FPanel.Changed;
+    UpdatePanel;
+  end;
+end;
+
+function TMView.SortPanelHit(AX, AY: Integer): TPanelHit;
+begin
+  if FPanel = nil then
+  begin
+    Result.Part := ppNone;
+    Result.Slot := -1;
+    Exit;
+  end;
+  SyncPanelLayout;
+  Result := FPanel.HitTest(AX, AY);
+end;
+
+procedure TMView.SortPanelMouseGone;
+begin
+  if FPanel = nil then
+    Exit;
+  FPanel.MouseGone(NowMs);
+  if FPanel.Visible then
+    UpdatePanel;
+end;
+
+procedure TMView.ShowNote(const AText: string; ADurationMs: Double);
+begin
+  ShowStatus(AText, ADurationMs);
+end;
+
+function TMView.FileJobsBusy: Boolean;
+begin
+  Result := Assigned(FMover) and FMover.Busy;
+end;
+
+function TMView.SortStartFolder(ASlot: Integer): string;
+var
+  Candidate: string;
+begin
+  Result := '';
+  if (ASlot >= 0) and (ASlot < FConfig.SortFolders.Count) then
+  begin
+    Candidate := FConfig.SortFolders.Slot(ASlot).Folder;
+    if DirectoryExists(Candidate) then
+      Exit(Candidate);
+  end;
+  { Sort folders are usually side by side: next to the last one chosen. }
+  if FConfig.SortFolders.Recent.Count > 0 then
+  begin
+    Candidate := ExtractFileDir(ExcludeTrailingPathDelimiter(FConfig.SortFolders.Recent[0]));
+    if (Candidate <> '') and DirectoryExists(Candidate) then
+      Exit(Candidate);
+  end;
+  if FNavigator.HasCurrentImage then
+  begin
+    Candidate := ExtractFileDir(ExcludeTrailingPathDelimiter(FNavigator.CurrentDirectory));
+    if (Candidate <> '') and DirectoryExists(Candidate) then
+      Exit(Candidate);
+  end;
+  Result := ExcludeTrailingPathDelimiter(UserDocumentsDirectory);
+end;
+
+{ ---- Icons (Phase G, G1 stage 2) ---------------------------------------- }
+
+const
+  IconReloadMs = 3000;           { opening the panel reads the icon folder again after this }
+  IconSizes: array[0..6] of Integer = (16, 24, 32, 48, 64, 128, 256);
+
+function IsFullPath(const APath: string): Boolean;
+begin
+  Result := ExtractFileDrive(APath) <> '';
+end;
+
+function TMView.SlotIconFile(ASlot: Integer): string;
+var
+  Slot: TSortSlot;
+  Base: string;
+begin
+  Result := '';
+  if (ASlot < 0) or (ASlot >= FConfig.SortFolders.Count) then
+    Exit;
+  Slot := FConfig.SortFolders.Slot(ASlot);
+  if Slot.Icon = '-' then
+    Exit;
+  if Slot.Icon <> '' then
+  begin
+    if IsFullPath(Slot.Icon) then
+      Result := Slot.Icon
+    else
+      Result := FConfig.IconFilesFolder + Slot.Icon;
+    Exit;
+  end;
+  { By name: Good.ico (or .png) for ...\Good. }
+  Base := FConfig.IconFilesFolder + IconBaseName(Slot.Folder);
+  if FIcons.Has(Base + '.ico') then
+    Result := Base + '.ico'
+  else if FIcons.Has(Base + '.png') then
+    Result := Base + '.png';
+end;
+
+procedure TMView.RequestIcons(AForce: Boolean);
+var
+  Extra, Folders: TStringList;
+  I: Integer;
+  Slot: TSortSlot;
+begin
+  if FIcons = nil then
+    Exit;
+  if (not AForce) and FIcons.Loaded and (FIcons.LoadedAgoMs(NowMs) < IconReloadMs) then
+    Exit;
+  Extra := TStringList.Create;
+  Folders := TStringList.Create;
+  try
+    for I := 0 to FConfig.SortFolders.Count - 1 do
+    begin
+      Slot := FConfig.SortFolders.Slot(I);
+      Folders.Add(Slot.Folder);
+      if (Slot.Icon <> '') and (Slot.Icon <> '-') and IsFullPath(Slot.Icon) then
+        Extra.Add(Slot.Icon);
+    end;
+    FIcons.Load(FConfig.IconFilesFolder, Extra, Folders, NowMs);
+  finally
+    Extra.Free;
+    Folders.Free;
+  end;
+end;
+
+procedure TMView.ReloadIcons;
+begin
+  RequestIcons(True);
+end;
+
+procedure TMView.HandleIconsChanged(Sender: TObject);
+begin
+  if FPanel = nil then
+    Exit;
+  FPanel.Changed;
+  UpdatePanel;
+end;
+
+function TMView.PanelSlotIcon(ASlot, ASize: Integer): TBGRABitmap;
+begin
+  Result := nil;
+  if (FIcons = nil) or not FIcons.Loaded then
+    Exit;
+  Result := FIcons.Bitmap(SlotIconFile(ASlot), ASize);
+end;
+
+function TMView.PanelSlotMissing(ASlot: Integer): Boolean;
+begin
+  Result := Assigned(FIcons) and (ASlot >= 0) and (ASlot < FConfig.SortFolders.Count)
+    and FIcons.FolderMissing(FConfig.SortFolders.Slot(ASlot).Folder);
+end;
+
+function TMView.CanMakeIcon: Boolean;
+begin
+  Result := ImageToSave <> nil;
+end;
+
+procedure TMView.MakeIconFromImage;
+var
+  Img: IDecodedImage;
+  Src, Square, Sized: TBGRABitmap;
+  FullW, FullH, ViewW, ViewH, BX, BY, BS, I: Integer;
+  CX, CY, Side, X1, Y1, Scale, FX, FY: Double;
+  Sel: TImageRect;
+  Pngs: array of TBytes;
+  Mem, Ico: TMemoryStream;
+  Writer: TFPWriterPNG;
+  Job: TFileJob;
+  Name, FromWhere: string;
+begin
+  Img := ImageToSave;
+  if (Img = nil) or (Img.Bitmap = nil) or (Img.Bitmap.Width <= 0) then
+  begin
+    ShowStatus('make icon: no image to make it from', 4000);
+    Exit;
+  end;
+  Src := Img.Bitmap;
+  FullW := Img.FullWidth;
+  FullH := Img.FullHeight;
+  if (FullW <= 0) or (FullH <= 0) then
+  begin
+    FullW := Src.Width;
+    FullH := Src.Height;
+  end;
+
+  { The square, in original pixels: the selection's middle, or the
+    middle of the view; as large as the selection's shorter side, or the
+    view's. }
+  if CanCrop then
+  begin
+    Sel := FRenderer.Selection;
+    CX := (Sel.X0 + Sel.X1) / 2;
+    CY := (Sel.Y0 + Sel.Y1) / 2;
+    Side := Min(Sel.X1 - Sel.X0, Sel.Y1 - Sel.Y0);
+    FromWhere := 'the selection';
+  end
+  else
+  begin
+    ViewW := FPreviewWidth;
+    ViewH := FPreviewHeight;
+    if Assigned(FSurface) and (FSurface.ClientWidth > 0) and (FSurface.ClientHeight > 0) then
+    begin
+      ViewW := FSurface.ClientWidth;
+      ViewH := FSurface.ClientHeight;
+    end;
+    if FRenderer.ScreenToImage(ViewW / 2, ViewH / 2, CX, CY)
+      and FRenderer.ScreenToImage(ViewW / 2 + 100, ViewH / 2, X1, Y1) then
+    begin
+      Scale := Hypot(X1 - CX, Y1 - CY) / 100;    { original pixels per screen pixel }
+      Side := Min(ViewW, ViewH) * Scale;
+    end
+    else
+    begin
+      CX := FullW / 2;
+      CY := FullH / 2;
+      Side := Min(FullW, FullH);
+    end;
+    FromWhere := 'the middle of the screen';
+  end;
+  if (Side < 1) or (Side > Min(FullW, FullH)) then
+    Side := Min(FullW, FullH);
+  CX := EnsureRange(CX, Side / 2, FullW - Side / 2);
+  CY := EnsureRange(CY, Side / 2, FullH - Side / 2);
+
+  { Original pixels -> pixels of the bitmap in memory (a quick view is
+    smaller). }
+  FX := Src.Width / FullW;
+  FY := Src.Height / FullH;
+  BS := Max(1, Min(Round(Side * Min(FX, FY)), Min(Src.Width, Src.Height)));
+  BX := EnsureRange(Round((CX - Side / 2) * FX), 0, Src.Width - BS);
+  BY := EnsureRange(Round((CY - Side / 2) * FY), 0, Src.Height - BS);
+
+  Square := nil;
+  Mem := nil;
+  Ico := nil;
+  Writer := TFPWriterPNG.Create;
+  try
+    Writer.UseAlpha := True;
+    Writer.WordSized := False;
+    Square := Src.GetPart(Rect(BX, BY, BX + BS, BY + BS)) as TBGRABitmap;
+    SetLength(Pngs, Length(IconSizes));
+    Mem := TMemoryStream.Create;
+    for I := 0 to High(IconSizes) do
+    begin
+      Sized := Square.Resample(IconSizes[I], IconSizes[I], rmFineResample) as TBGRABitmap;
+      try
+        Mem.Clear;
+        Sized.SaveToStream(Mem, Writer);
+        SetLength(Pngs[I], Mem.Size);
+        if Mem.Size > 0 then
+          Move(Mem.Memory^, Pngs[I][0], Mem.Size);
+      finally
+        Sized.Free;
+      end;
+    end;
+    Ico := TMemoryStream.Create;
+    WriteIconFile(Ico, Pngs, IconSizes);
+
+    if FNavigator.HasCurrentImage then
+      Name := IconBaseName(ExcludeTrailingPathDelimiter(FNavigator.CurrentDirectory))
+    else
+      Name := 'icon';
+    Job := Default(TFileJob);
+    Job.Action := faWrite;
+    Job.Kind := fjIcon;
+    Job.TargetDir := ExcludeTrailingPathDelimiter(FConfig.IconFilesFolder);
+    Job.TargetName := Name + '.ico';
+    Job.CreateTarget := True;
+    Job.Slot := -1;
+    Job.Caption := Name;
+    Job.UndoOf := -1;
+    SetLength(Job.Data, Ico.Size);
+    if Ico.Size > 0 then
+      Move(Ico.Memory^, Job.Data[0], Ico.Size);
+    QueueJob(Job);
+    if Img.Quality < qlFull then
+      FromWhere := FromWhere + ', from the quick view (the full image wasn''t loaded yet)';
+    ShowStatus('making icon ' + Job.TargetName + ' from ' + FromWhere + ' ...', 0);
+  except
+    on E: Exception do
+      ShowStatus('make icon: ' + E.Message, 8000);
+  end;
+  Writer.Free;
+  Square.Free;
+  Mem.Free;
+  Ico.Free;
+end;
+
+{ UI thread: the icon file is written. }
+procedure TMView.HandleIconWritten(const AResult: TFileJobResult);
+var
+  Status: string;
+  I: Integer;
+begin
+  if not AResult.OK then
+  begin
+    ShowStatus('could not make the icon: ' + AResult.Message, 10000);
+    Exit;
+  end;
+  Status := 'icon made: ' + AResult.ResultFile;
+  if AResult.RenamedTo <> '' then
+    Status := Status + '   (the one before is now ' + ExtractFileName(AResult.RenamedTo) + ')';
+  ShowStatus(Status, 8000);
+  RequestIcons(True);
+  { The buttons that take it by name light up once it is read. }
+  if Assigned(FPanel) then
+    for I := 0 to FConfig.SortFolders.Count - 1 do
+      if (FConfig.SortFolders.Slot(I).Icon = '')
+        and SameText(IconBaseName(FConfig.SortFolders.Slot(I).Folder), AResult.Job.Caption) then
+        FPanel.Flash(I, True, NowMs);
+  UpdatePanel;
+end;
+
+{ ---- Sorting pasted / cropped images, paste from the settings screen (Day 21) ---- }
+
+{ The pasted or cropped image is saved into the slot's folder as PNG
+  (never over another file: _1 ...). Left click: it stays on screen;
+  right click ("move"): the file shown before comes back at once. }
+procedure TMView.SortScratch(ASlot: Integer; AMove: Boolean);
+var
+  Img: IDecodedImage;
+  Slot: TSortSlot;
+  FileName: string;
+begin
+  Slot := FConfig.SortFolders.Slot(ASlot);
+  if Assigned(FSaveThread) then
+  begin
+    FPanel.Flash(ASlot, False, NowMs);
+    SortNote('still saving the previous image ...', 'still saving ...', 3000);
+    Exit;
+  end;
+  Img := ImageToSave;
+  if Img = nil then
+  begin
+    FPanel.Flash(ASlot, False, NowMs);
+    SortNote('nothing to save', 'nothing to save', 3000);
+    Exit;
+  end;
+  FileName := IncludeTrailingPathDelimiter(Slot.Folder) + FScratchPrefix + '_'
+    + FormatDateTime('yyyymmdd-hhnnss', Now) + '.png';
+  if PanelSlotMissing(ASlot) then
+  begin
+    FPanel.Flash(ASlot, False, NowMs);
+    SortNote('folder not found: ' + Slot.Folder, 'folder not found', SortNoteMs);
+    Exit;
+  end;
+  FSavingPaste := True;
+  FSortSaveSlot := ASlot;
+  FSortSaveImage := Img;
+  FSortSaveTitle := FScratchTitle;
+  FSortSavePrefix := FScratchPrefix;
+  FSortSaveMove := AMove;
+  FSaveThread := TImageSaveThread.Create(Img, FileName, '', True);
+  Inc(FJobsInFlight);        { Undo waits for it }
+  FPanel.JobStarted(ASlot);
+  if AMove then
+  begin
+    SortNote('saving the image into ' + Slot.Name + ' ...',
+      'saving into ' + Slot.Name + ' ...', 0);
+    { The thread holds the image: the file comes back on screen now. }
+    if FNavigator.HasCurrentImage then
+      ShowCurrent;
+  end
+  else
+    SortNote('saving into ' + Slot.Name + ' ...', 'saving into ' + Slot.Name + ' ...', 0);
+end;
+
+{ PumpDeliveries: the save for a sort folder has finished. }
+procedure TMView.SortScratchSaved;
+var
+  Slot, SavedName: string;
+  E: TFileJob;
+begin
+  if (FSortSaveSlot >= 0) and (FSortSaveSlot < FConfig.SortFolders.Count) then
+    Slot := FConfig.SortFolders.Slot(FSortSaveSlot).Name
+  else
+    Slot := '';
+  SavedName := FSaveThread.SavedFileName;
+  if FJobsInFlight > 0 then
+    Dec(FJobsInFlight);
+  if Assigned(FPanel) then
+    FPanel.JobDone(FSortSaveSlot, SavedName <> '', NowMs);
+  if SavedName <> '' then
+  begin
+    { Shows up if that folder is browsed; Undo moves it into the
+      deleted-files folder, as for a copy. }
+    FNavigator.AddFile(SavedName, 0, Now);
+    E := Default(TFileJob);
+    E.Action := faCopy;
+    E.Kind := fjSort;
+    E.Source := SavedName;
+    E.Caption := Slot;
+    E.Slot := FSortSaveSlot;
+    AddUndo(E, SavedName);
+    SortNote('saved into ' + Slot + ': ' + ExtractFileName(SavedName),
+      'saved into ' + Slot + LineEnding + 'click here: undo', SortNoteMs);
+  end
+  else
+  begin
+    { A "move" that failed: the image is not lost, it comes back. }
+    if FSortSaveMove and Assigned(FSortSaveImage) and not FShowingPaste then
+      ShowScratch(FSortSaveImage, FSortSaveTitle, FSortSavePrefix);
+    SortNote(FSaveThread.ResultText, 'failed:' + LineEnding + FSaveThread.ResultText, 10000);
+  end;
+  FSortSaveSlot := -1;
+  FSortSaveImage := nil;
+end;
+
+procedure TMView.StartWithPaste;
+begin
+  { The last session behind it (opening shows "Opening ..." until the
+    image is on screen). }
+  if FConfig.LastDirectory <> '' then
+  begin
+    OpenMedia(FConfig.LastDirectory, FConfig.LastFile);
+    FKeepScratch := True;
+  end;
+  PasteFromClipboard;
+  if not FShowingPaste then
+  begin
+    { No image after all: the last session as usual. }
+    FKeepScratch := False;
+    if FConfig.LastDirectory = '' then
+      ShowMessageText(NoStartMessage);
+    Exit;
+  end;
+  FRenderer.SetMessage('');
+  Refresh;
 end;
 
 end.

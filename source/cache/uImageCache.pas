@@ -129,6 +129,9 @@ type
     function ErrorOf(const AFileName: string): IDecodedImage;
     { Removes this file's error entry, if any. }
     procedure DropError(const AFileName: string);
+    { Removes every entry of this file (moved away, or back by Undo:
+      Phase G sorting). }
+    procedure DropFile(const AFileName: string);
 
     { Memory used by this file's entries. }
     function BytesOf(const AFileName: string): Int64;
@@ -375,6 +378,20 @@ begin
       if FEntries[I].Image.IsError
         and SameText(FEntries[I].Image.Key.FileName, AFileName) then
         Exit(FEntries[I].Image);
+  finally
+    FLock.Release;
+  end;
+end;
+
+procedure TImageCache.DropFile(const AFileName: string);
+var
+  I: Integer;
+begin
+  FLock.Acquire;
+  try
+    for I := FCount - 1 downto 0 do
+      if SameText(FEntries[I].Image.Key.FileName, AFileName) then
+        DeleteAt(I);
   finally
     FLock.Release;
   end;

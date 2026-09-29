@@ -591,6 +591,56 @@ begin
   end;
 end;
 
+{ Phase G (sorting): a file moved away leaves the lists and the next one
+  becomes current; a file copied in (or moved back by Undo) appears.
+  Runs last: it changes the test tree. }
+procedure TestRemoveAndAdd;
+var
+  Nav: TNavigator;
+begin
+  WriteLn;
+  WriteLn('-- Files moved away and back (sorting) --');
+
+  Nav := NewNavigator;
+  try
+    { The whole tree (root, not the file's folder's parent), so B follows A1. }
+    Nav.OpenPath(RootDir, P('A/A1/a1_3.jpg'));
+    Check('starts on a1_3', Name(Nav.CurrentFileName) = 'a1_3.jpg', Nav.CurrentFileName);
+
+    DeleteFile(P('A/A1/a1_3.jpg'));
+    Check('current moved away: reported as changed', Nav.RemoveFile(P('A/A1/a1_3.jpg')));
+    Check('... the next image is current (a1_10)', Name(Nav.CurrentFileName) = 'a1_10.jpg',
+      Nav.CurrentFileName);
+    Check('... two images left in A1', Nav.ImageCount = 2, IntToStr(Nav.ImageCount));
+
+    DeleteFile(P('A/A1/a1_2.jpg'));
+    Check('another file moved away: current unchanged',
+      (not Nav.RemoveFile(P('A/A1/a1_2.jpg'))) and (Name(Nav.CurrentFileName) = 'a1_10.jpg'),
+      Nav.CurrentFileName);
+    Check('... one image left', Nav.ImageCount = 1, IntToStr(Nav.ImageCount));
+
+    Touch('A/A1/a1_3.jpg', EncodeDate(2020, 1, 1));
+    Nav.AddFile(P('A/A1/a1_3.jpg'), 0, EncodeDate(2020, 1, 1));
+    Check('moved back: listed again, current unchanged',
+      (Nav.ImageCount = 2) and (Name(Nav.CurrentFileName) = 'a1_10.jpg'), Nav.CurrentFileName);
+    Nav.AddFile(P('A/A1/a1_3.jpg'), 0, EncodeDate(2020, 1, 1));
+    Check('added twice: listed once', Nav.ImageCount = 2, IntToStr(Nav.ImageCount));
+    Check('SelectFile: a1_3 current again',
+      Nav.SelectFile(P('A/A1/a1_3.jpg')) and (Name(Nav.CurrentFileName) = 'a1_3.jpg'),
+      Nav.CurrentFileName);
+    Nav.AddFile(P('A/A1/notes.txt'), 0, Now);
+    Check('not an image: not added', Nav.ImageCount = 2, IntToStr(Nav.ImageCount));
+
+    Check('SelectFile a1_10', Nav.SelectFile(P('A/A1/a1_10.jpg')));
+    DeleteFile(P('A/A1/a1_10.jpg'));
+    Nav.RemoveFile(P('A/A1/a1_10.jpg'));
+    Check('last of the folder moved away: next folder (B)',
+      Name(Nav.CurrentFileName) = 'b.jpg', Nav.CurrentFileName);
+  finally
+    Nav.Free;
+  end;
+end;
+
 begin
   PassCount := 0;
   FailCount := 0;
@@ -611,6 +661,7 @@ begin
     TestBackgroundTree;
     TestFilesAhead;
     TestNoDiskMode;
+    TestRemoveAndAdd;
   finally
     DeleteTree(RootDir);
   end;
