@@ -266,7 +266,7 @@ uses
 const
   { The About box: what MView is, and where it comes from. }
   AboutText =
-    'Versarite MView 0.19.0-alpha' + LineEnding +
+    'Versarite MView 0.20.0-alpha' + LineEnding +
     'A microscopy image viewer, driven by the mouse.' + LineEnding +
     LineEnding +
     'Written with support from Claude/Opus 5.5 and ChatGPT' + LineEnding +
