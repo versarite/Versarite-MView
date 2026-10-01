@@ -591,6 +591,61 @@ begin
   end;
 end;
 
+{ Day 22 (ClimbUp): at the end of the tree a step doesn't wrap around
+  but asks the owner to climb one level (TMView opens the parent). }
+procedure TestClimbUp;
+var
+  Nav: TNavigator;
+begin
+  WriteLn;
+  WriteLn('-- Climbing at the end of the tree (ClimbUp) --');
+
+  Nav := NewNavigator;
+  try
+    Nav.ClimbUp := True;
+    Nav.OpenPath(P('A/A1'));           { a folder: it is the root }
+    Check('folder opened: it is the root', Nav.RootDirectory = P('A/A1'), Nav.RootDirectory);
+    Check('its parent is no drive: may climb', Nav.CanClimbUp);
+    Check('next folder at the end: no step', not Nav.NextDirectory);
+    Check('  ...climbing wanted', Nav.ClimbWanted);
+    Check('  ...still on a1_2', Name(Nav.CurrentFileName) = 'a1_2.jpg', Nav.CurrentFileName);
+    Check('previous folder: climbing wanted too', (not Nav.PreviousDirectory) and Nav.ClimbWanted);
+    Nav.NextImage;
+    Check('next image inside the folder: a step, no climbing',
+      (Name(Nav.CurrentFileName) = 'a1_3.jpg') and not Nav.ClimbWanted, Nav.CurrentFileName);
+    Nav.NextImage;
+    Check('last image, next: no wrap to a1_2, climbing wanted',
+      (not Nav.NextImage) and Nav.ClimbWanted and (Name(Nav.CurrentFileName) = 'a1_10.jpg'),
+      Nav.CurrentFileName);
+  finally
+    Nav.Free;
+  end;
+
+  Nav := NewNavigator;
+  try
+    Nav.ClimbUp := False;
+    Nav.OpenPath(P('A/A1'));
+    Nav.NextImage;
+    Nav.NextImage;
+    Check('ClimbUp off: last image, next wraps to a1_2 as before',
+      Nav.NextImage and (Name(Nav.CurrentFileName) = 'a1_2.jpg') and not Nav.ClimbWanted,
+      Nav.CurrentFileName);
+    Check('ClimbUp off: next folder asks for nothing', (not Nav.NextDirectory) and not Nav.ClimbWanted);
+  finally
+    Nav.Free;
+  end;
+
+  Nav := NewNavigator;
+  try
+    Nav.ClimbUp := True;
+    Nav.OpenPath(P('A'));              { A1 and A2 below it }
+    Check('inside the tree: next folder steps as before (A1 -> B is outside: climb)',
+      (not Nav.NextDirectory) and Nav.ClimbWanted, Nav.CurrentFileName);
+  finally
+    Nav.Free;
+  end;
+end;
+
 { Phase G (sorting): a file moved away leaves the lists and the next one
   becomes current; a file copied in (or moved back by Undo) appears.
   Runs last: it changes the test tree. }
@@ -661,6 +716,7 @@ begin
     TestBackgroundTree;
     TestFilesAhead;
     TestNoDiskMode;
+    TestClimbUp;
     TestRemoveAndAdd;
   finally
     DeleteTree(RootDir);

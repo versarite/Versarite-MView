@@ -1,0 +1,249 @@
+MView Day 23 (2026-10-01, after midnight)
+=========================================
+
+Edit mode under zoom / rotate (user)
+------------------------------------
+"the status line in the top left corner for edit mode is blocked by the
+x-button zoom/rotate status lines ... the term 'Edit On' remains in the
+beginning of the zoom/rotate line, since edit mode is on regardless".
+- TRenderer.ModeLine: "EDIT ON   |   ZOOM ..." / "... ROTATE ..." while
+  edit mode is on; the plain edit line says "EDIT ON" too.
+Units changed: uRenderer. Spec §9.7.
+
+Only one instance (user)
+------------------------
+"add an ini entry 'only one instance' (1/0) and make it on by default. it
+should prevent several instances when operating from the total commander."
+- [Startup] OnlyOneInstance=1 (default). uSingleInstance (new): a named
+  mutex says "one runs"; the handle of a hidden message-only window (its
+  own window procedure) sits in a small named shared memory block. A second MView (MView.lpr, before it makes a
+  window) sends its file or folder as a full path with WM_COPYDATA
+  (tagged 'MVOP', SendMessageTimeout 5 s, so a hung MView can't hang the
+  new one), brings the running one to the front and ends. No window yet
+  after 3 s (just starting), or no answer: it runs on its own.
+- Review (independent) before delivery: a first version received the
+  message in the main form; the LCL hands messages below WM_USER to
+  DefWindowProc, not to a form's message method, and going fullscreen
+  makes the form's window (and handle) again. Hence the separate message
+  window, which stays. The sender also allows the running MView to come
+  to the front (AllowSetForegroundWindow).
+- The main form gets the path (HandleHandedOver), answers at once and
+  opens it right after, like a drop (but never onto the sort panel); on
+  the settings screen it starts the viewer with it; no path: it only
+  comes to the front.
+Units new: uSingleInstance. Changed: MView.lpr, uConfig, umainform.
+Spec §11, §14.
+
+Follow Total Commander (user)
+-----------------------------
+Asked: can MView follow Total Commander's folder? User (TC 11.03):
+"option 1 would be good enough, but it would be cool to see if mview
+could be a power viewer for tc".
+- Total Commander sends no notice when its folder changes, but answers
+  questions. uTCFollow (new) asks a few times a second (TMView's timer,
+  every 200 ms): WM_COPYDATA 'GW' with "SP" (the active panel's path) and
+  "SC" (the name under its cursor), answered as WM_COPYDATA 'RW' (UTF-16)
+  to a hidden message window of its own. These codes come from community
+  scripts; the forum / wiki pages couldn't be read here, so: if the path
+  question gets no answer, the documented WM_USER+50 (1000 = active
+  panel, 9 / 10 = path line, its text minus the mask) gives the folder;
+  if the cursor question gets no answer, MView says so once and follows
+  the folder only.
+- [Sort] FollowTotalCommander: 0 off, 1 its folder (default), 2 also the
+  image under its cursor. Right-click menu "Follow Total Commander" (Off /
+  Its folder / Its folder and the image under its cursor), saved at once.
+- MView reacts to changes in Total Commander only, never to its own
+  browsing: the first answer is just noted; another folder is opened (a
+  drive root keeps its backslash); in mode 2 the image under the cursor
+  is shown from the lists, or with its folder; while that folder is
+  being opened, further cursor moves are remembered and the last one is
+  shown when it is ready (no scan restarted on every arrow key).
+  Archives, FTP and plugin paths are ignored (told from the text: no disk
+  access on the window thread). A Total Commander that is busy: nothing
+  more is asked in that round (no 1 s stalls).
+- Review (independent) found and fixed: "C:" became "C:"; archives
+  opened as folders ("Not found"); a busy Total Commander could stall a
+  poll for 1.2 s; the cursor support was never asked again after one
+  timeout; holding an arrow key restarted the folder scan every 200 ms.
+Units new: uTCFollow. Changed: uMView, uConfig, umainform. Spec §9.7,
+§14.
+- Later, maybe: MView as a real Total Commander Lister plugin (F3 /
+  Quick view inside Total Commander); a separate DLL, bigger work.
+
+Leak dialogs from the second MView (user's test)
+------------------------------------------------
+Double-clicking images in Total Commander with OnlyOneInstance=1: the
+image opened in the running MView, but each second MView showed a
+heaptrc "Heap dump" dialog (debug build): 4 unfreed blocks from uIOGate's
+initialization. The I/O gate is deliberately never freed (a stuck read
+may still use it while the process ends); a normal run doesn't get to
+the report, the early exit does.
+- MView.lpr: the second MView frees IOGate before it ends (no thread
+  exists yet at that point).
+Units changed: MView.lpr.
+
+Following the cursor didn't work (user's test)
+----------------------------------------------
+"the totalcmd line by line following ... does not respond in that way.
+the dir follower works perfectly fine."
+- Possible causes: Total Commander answers the cursor question with a
+  full path (rejected by the first version: a name with a backslash), or
+  doesn't answer it at all.
+- uTCFollow: a full path is now taken as it is; and if the question gets
+  no answer, the documented WM_USER+50 way: the active file list's handle
+  (3), the cursor's index (1007 left / 1008 right), that line's text
+  (LB_GETTEXT; the name before the first tab, "name<tab>ext" joined,
+  "[folder]" skipped).
+- For the next test: the D line shows "TC folder: question / path line,
+  cursor: question / list "name"" (or "no answer"), so one run shows
+  which way works on TC 11.03.
+Units changed: uTCFollow, uMView.
+- Test 2 (user): "it replies always with a single number, regardless
+  which line is selected. the number represents the dir": "SC" isn't the
+  name under the cursor (a count or index). The name question is "SN"
+  (as also used by ALTRun, github.com/zhugecaomao/ALTRun pull 106, next
+  to "SP"). uTCFollow now asks "SN"; a bare number is never taken for a
+  name (then the file list is read instead).
+- User: "when in either 'tc follow' mode, dir recursion should be turned
+  off (independent from ini)". TMView.UseRecursive: [Navigation]
+  Recursive and not following; OpenMedia uses it for the scanner and the
+  navigator. Switching the mode reopens the image's folder with it.
+Units changed: uMView. Spec §9.7.
+
+TC following: the cursor works (user)
+-------------------------------------
+"this is brilliant - it works like a charm ... totalcmd is the premier
+tree manager, no reason to re-invent the wheel."
+
+The magnifier (Phase H, G6)
+---------------------------
+User: "should we move onto the magnifier?" Built as decided (Day 21):
+- TRenderer.Lens (TLensState: on, locked, centre, radius, Mag relative to
+  the screen, sharpen 0 / 1 / 2); the mode line shows it.
+- GPU: DrawLens: a black disc, the textures again with translate / scale
+  around the lens' centre, the shader cuts round (gl_FragCoord) and
+  sharpens (4 neighbour texels, per-tile texel size); a scissor square
+  without shaders; dark / light rim (amber when locked); tiles under the
+  lens uploaded first.
+- CPU: DrawLens: the source pixels under the lens (+1 each side; the
+  screen copy when the lens shows fewer than real pixels), SharpenBitmap
+  (uFilterImage) at source resolution, enlarged (nearest from 4 x, fine
+  resample below; sampled when huge), filters, round mask, rim.
+- TMView: SetMagnifier (menu "Magnifier (lens)", command Magnifier, Esc);
+  HandleLensMouse: moves with the mouse (not over open panels), left drag
+  = magnification (sideways) / size (up = larger), cursor back to the
+  centre after it; wheel = sharpening, a notch at a time; wheel click =
+  lock. Full images at once while it is on. [Magnifier]
+  MagnificationPercent / Size / Sharpen, written on exit.
+- User during the work: "the lens should also be switched off from the
+  right click menu. since the wheel is occupied for the sharpening,
+  images cannot be changed when the lens is on. i think this is
+  reasonable. the lens is not a casual gimmick, its use is focused." (The
+  menu entry switches it on and off.)
+- Review (independent) found and fixed: the tilt wheel was taken (folder
+  steps); the zoom / rotate modes lost their wheel; fine wheels cycled the
+  sharpening several times per notch; a drag could stick after a lost
+  release (now ends when no button is down; other presses during it are
+  taken); the CPU sharpened the enlarged picture (grid lines) instead of
+  the image's pixels; the CPU lens could cut out millions of pixels per
+  move when zoomed far out (now the screen copy, or sampling); the size
+  wasn't limited to the window at start; draw order of lens and frame
+  now the same on both renderers.
+Units changed: uRenderer, uGLRenderer, uFilterImage, uMView, uConfig,
+uCommands, uMouseProfile, uMouseEngine, umainform. Spec §9.9, §14;
+Strategy G6.
+
+End of day / where MView stands (user)
+--------------------------------------
+"it is amazingly useful, in particular because of the totalcmd bridge.
+... i think we have reached a point where the functions are implemented,
+and what is left are the microscopy-specific functions, in particular
+size scale and measurement." Image editing (drawn elements, text) is out
+of scope: not viewing, keyboard-reliant. In scope: the scale bar.
+- Test files coming: modern Leica SP8 confocal images (the technology
+  reference) and Nikon images (likely a Nikon camera body: what the user
+  will use next).
+- Note for the plan: a camera body records nothing about the microscope
+  (objective, adapter), so its images carry no pixel size. The scale then
+  comes from a calibration: a stage micrometer imaged once per objective,
+  MView keeps um / px per objective and camera, and the objective is
+  picked with the mouse. Leica SP8 files (LIF, or exported TIFF with their
+  XML) carry the pixel size themselves.
+- Idea (user): a "Versarite MView" entry in the metadata of images MView
+  writes, listing what was done (crop, resize, filters, mirror, source
+  file). Possible for what MView saves (PNG: a text chunk, read by
+  exiftool, IrfanView, Fiji); the original files are never changed.
+  To decide next session.
+
+Fit <-> 100 % centred (user)
+----------------------------
+"when [toggle between fit and 100%] is used ... the image is also linked
+to the mouse cursor. it should be window-centered. otherwise a small
+image is dragged into the top left corner, and a very large image might
+become difficult to locate."
+- TMView, cmdToggleFit: 100 % with the image centred in the window
+  (TRenderer.OriginalSize) instead of OriginalSizeAt(mouse). The
+  command OriginalSize (its own entry in the profile) still keeps the
+  point under the mouse.
+Units changed: uMView, uMouseProfile (caption), uCommands (comment).
+Spec §9.2.
+- User: OriginalSize "should also be centered. the only function i can
+  think of where the mouse cursor centered view is nice is in the global
+  zoom mode (x-key)". cmdOriginalSizeAt now centres too. Zooming at the
+  mouse stays: the zoom mode (X1), and ZoomIn / ZoomOut with the zones off
+  (as the user asked on Day 22; with the zones on they zoom at the
+  centre).
+
+Following Total Commander: visible, and only when it runs (user)
+----------------------------------------------------------------
+"it works perfectly, so well that it causes problems. when it is
+enabled, but the totalcmd is not used, the recursion does not work.
+there is no way to spot the cause ... how can we fix this in a way that
+i can see that it is in totalcmd mode, without being too intrusive".
+- TMView.UseRecursive: subfolders are off only while following is set
+  AND Total Commander runs (a window lookup when a folder is opened, so a
+  start from Total Commander counts from the first image).
+- "[TC]" in the info line (before [filtered] etc.) while MView follows a
+  running Total Commander; gone when it is closed or following is off.
+  Nothing on the image itself.
+Units changed: uMView. Spec §9.7.
+- User: "1 is great. 2 is not enough. can you make the TC bold and
+  blinking?" Instead of "[TC]" in the info line: a mode badge drawn by
+  both renderers (TRenderer.SetBadge / BadgeBitmap / BadgeOn): bold dark
+  "TC" on an amber rounded label in the bottom right corner, blinking
+  0.6 s on / 0.6 s off (TMView's timer) while MView follows a running
+  Total Commander; also with the info line off. The GPU uploads it like
+  the panels (once per text).
+Units changed: uRenderer, uGLRenderer, uMView. Spec §9.7.
+- User: "the blinking is too much... turn it off please". The badge stays
+  bold and amber, steady (no blink timer).
+- User: "maybe we shorten the status line by a bit and make the amber
+  button permanent? transparent when off, and light blue/amber when in
+  either mode of TC following?" The "TC" label is always there:
+  see-through (a light outline, faint text) when MView doesn't follow
+  (off, or Total Commander not running), light blue for "its folder",
+  amber for "its folder and the image under its cursor". The info line
+  ends before it (CPU: cut with "...", GPU: clipped).
+Units changed: uRenderer, uGLRenderer, uMView. Spec §9.7.
+- User: "can this button be made clickable to cycle through the options
+  and select them?" A left click on the "TC" label (TRenderer.BadgeHit,
+  a few px of extra room) cycles off -> its folder -> folder and cursor
+  -> off, saved as the menu does; the info line names the setting (and
+  says when Total Commander isn't running). Taken before the panels and
+  the lens.
+
+v0.21.0-alpha prepared (user)
+-----------------------------
+"please check the git folder c:\projects\GIT\Versarite MView\ and
+prepare for submission as v21 prerelease. write the total commander
+connection in the .md"
+- The GitHub folder was checked against the project: every source file,
+  test and document is the latest version; .gitignore keeps out build\,
+  the zips, docs\hamana_screens and the private test images.
+- Version 0.21.0-alpha: the About box (umainform), readme.md (status,
+  goals, filters and magnifier in "Using it", a new section "Working with
+  Total Commander", TestFilters in the test list), the spec's roadmap.
+- docs\release_notes_v0.21.0-alpha.md (new): the Total Commander
+  connection, filters, magnifier, the rest, fixes, what's not yet.
+- Spec .docx made again from the .md.
+Written to the project and to the GitHub folder.

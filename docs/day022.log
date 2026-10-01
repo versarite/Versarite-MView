@@ -1,0 +1,197 @@
+MView Day 22 (2026-09-30)
+=========================
+
+A photo that stayed half blocky (user)
+--------------------------------------
+test\images\problem\2014412163548_4.jpg (3264 x 2448, a phone photo;
+private, not for the repository: test\images\* is ignored). Some parts
+of the picture stayed coarse and blocky, the rest was sharp; the
+diagnostics line said "sharpening 3 / 12".
+- The file is fine (PIL and MView decode it completely; a few zero bytes
+  after the end marker, harmless).
+- Cause: the GPU renderer shows a large image first from its small screen
+  copy, then uploads the full image tile by tile (12 tiles of 1022 px
+  here), one step per frame, and asked for the next frame with
+  FControl.Invalidate at the end of Paint. TOpenGLControl.Invalidate
+  does nothing while the control paints (csCustomPaint, LCL
+  openglcontext.pas), so the next step only came when something else
+  repainted the view (mouse, info line, timer events). Here nothing did
+  after 3 tiles: 9 tiles stayed at the screen copy's resolution.
+- Fix: uGLRenderer marks the window itself (LCLIntf.InvalidateRect on its
+  handle), which is kept during the paint; and TMView.PumpDeliveries
+  repaints every 50 ms while the renderer reports IsUploading (safety
+  net).
+Units changed: uGLRenderer, uMView.
+
+Leaving the tree upwards (user)
+-------------------------------
+"i want an ini 'parse 1 level upwards' (1/0) entry that allows leaving
+the accessible directory tree - by one level upwards ... if i start by
+passing an image to mview that is in a dir that has no own sub
+directories, i can now travel successively upwards and explore the
+tree." / "it does not work ... on dirs stored in the side panel. i am
+locked in the set directory".
+- Opening a folder (the side panel, a drop) makes that folder the root;
+  with WrapScope=Dir (the user's setting) the image steps stay in the
+  folder, and the folder steps (gestures left / right, tilt) had nowhere
+  to go: locked in.
+- New [Navigation] ClimbUp=1 (default 0): a step that runs past the end
+  of the tree doesn't wrap; TNavigator reports ClimbWanted, TMView opens
+  the root's parent keeping the current image, and when that tree has
+  been scanned it does the same step again, which lands in the old
+  root's neighbouring folder. Repeats level by level, up to one level
+  below the drive or network share (CanClimbUp); there it wraps as
+  before. Preloading no longer looks round to the tree's start while
+  climbing is possible.
+- The gesture up (ParentFolder) still widens the tree by one level at
+  any time.
+- Review (independent) found and fixed: fast steps at the end restarted
+  the climb (and cleared the cache) again and again: steps now wait while
+  the folder above is read and the last one is done then (not longer than
+  20 s); the replayed step could jump from a place the user had moved
+  on to (same fix); climbing and Parent folder no longer throw away the
+  decoded images (OpenMedia AKeepCache); climbing needs Recursive=1.
+  Noted: while a very large image goes to the GPU (1-2 s at 100 MP) the
+  frames follow each other so closely that the 50 ms timer waits for the
+  upload to finish (Windows gives paints priority over timers).
+- TestNavigation: TestClimbUp (11 checks).
+Units changed: uNavigator, uMView, uConfig. Spec §10, §14.
+
+Zoom centre in the 4-zone mode (user)
+-------------------------------------
+"in single screen mode, the center of zooming is the mouse pointer. that
+is great. in 4-zone mode the zoom center should be the center of the
+screen, otherwise the image moves to the top left corner."
+- uMouseEngine: ZoomIn / ZoomOut with the zones on zoom at the middle of
+  the view (the engine's view size); zones off: at the mouse as before.
+  Zoom mode (X1) keeps zooming at the mouse (the mouse can be anywhere
+  there, and pointing is the point of it).
+- TestMouse: the Inspect-zone check now expects the middle; zoom mode
+  checked to stay at the mouse.
+Units changed: uMouseEngine. Spec §9.2.
+
+Compile fix
+-----------
+- uNavigator: WrapsAtEnd was declared among the fields ("Fields cannot
+  appear after a method or property definition"); moved after the other
+  methods. All classes checked for the same pattern.
+
+Display filters, step 1 (Phase H "Looking closer", proposed name)
+------------------------------------------------------------------
+User: "big improvement!!! shall we get into the filter implementation?
+is this btw still phase G, or shall we call it something else?"
+Proposed: Phase H, "Looking closer" (filters and magnifier; G4 / G6 in
+Strategy_Phase_G.md). Not yet confirmed by the user.
+- uFilters (new): the maths, one definition for both renderers, in a
+  fixed order: black / white point -> brightness / contrast -> gamma ->
+  saturation / hue (YIQ, the luma stays) -> invert. Ranges, neutral
+  values, wheel steps, bar positions (gamma on a log scale, 1.0 in the
+  middle), the file name suffix for "apply to a copy" (step 2).
+- GPU (uGLRenderer): MView's first shader, a GLSL 1.10 fragment shader
+  over the existing tiles; the OpenGL 2.0 functions loaded at run time.
+  A filter change costs one frame, also at 100 MP. Without shaders:
+  FiltersAvailable False, the panel and the info line say so.
+- CPU (uRenderer): the filters on a copy of the screen-sized part only.
+- Filter panel (uFilterPanel, new) at the left edge: opens by resting
+  there (the sort panel's EdgeDelayMs / EdgeWidth), menu "Filters (side
+  menu, left)", command FilterPanel; pin [Filters] Pinned; a lock in the
+  header. Wheel over a row = a step, left drag = relative adjust, double-
+  click = reset that filter, Invert = click; Reset all; a hint line.
+  The renderers got a second panel slot (SetFilterPanel).
+- Lock filters: menu (ticked), the panel's lock, command LockFilters.
+  Unlocked, a new file starts unfiltered; a crop keeps the filters.
+- "[filtered]" / "[filtered, locked]" in the info line.
+- Commands FilterPanel, LockFilters, ResetFilters (mouse profile, none
+  bound by default). Esc closes the filter panel after the sort panel.
+- Review (independent) found and fixed before delivery: FPC's Format
+  has no "+" flag (the panel would have raised on every redraw); the
+  shader lifted blacks at low gamma (an epsilon in pow); a click on a
+  row could snap a small value to neutral (now only a real drag moves
+  it, and the snap is smaller than a wheel step); the "not available"
+  note when the shader fails at its first use; a program not deleted
+  after a failed link; the filtered copy kept after a reset.
+- TestFilters (new, plain fpc): 38 checks. build_test.bat runs it.
+Units new: uFilters, uFilterPanel. Changed: uRenderer, uGLRenderer,
+uMView, uCommands, uMouseProfile, uMouseEngine, uConfig, umainform.
+Spec §9.8, §14, §15; Strategy_Phase_G.md G4.
+Step 2 (next): histogram, Auto (Fiji-like, the selection as ROI), "Apply
+filters to a copy".
+
+Display filters, step 2: Auto, histogram, apply to a copy
+---------------------------------------------------------
+User: "it works very nicely!! what about the dynamic range? is this
+planned as auto setting?" - proposed Auto as a click (once) and a
+double-click (for every image); user: "yes, that is great".
+- uFilters: THistogram, AutoLevels (Fiji-like, 0.35 % saturated, half
+  at each end; at least 3 levels apart, else nothing changes).
+- uFilterImage (new): ApplyFiltersToBitmap (moved out of uRenderer),
+  ImageHistogram (luma, sampled to about 1 million pixels).
+- Filter panel: a histogram under the header (image, or the edit-mode
+  selection), black / white points marked; an Auto button next to Reset
+  all, lit while on for every image.
+- TMView: Auto once / for every image ([auto] in the info line; every
+  new image and its better version get their own points; a selection
+  re-levels live); a manual black / white change ends it. "Apply filters
+  to a copy" (menu, command ApplyFilters): a new image like a crop, named
+  after the filters; locked filters come back with the next file.
+- Review (independent) found and fixed: the histogram key used the
+  bitmap's address (animations re-levelled every frame; now the first
+  frame and a display counter); Auto could set the points closer than
+  the panel allows; locked filters lost after "apply to a copy"; Auto on
+  a flat image kept the previous image's points; a just-started
+  selection of a few pixels gave extreme stretches.
+- TestFilters: TestAuto (4 checks), 42 checks in all.
+Units new: uFilterImage. Changed: uFilters, uRenderer, uFilterPanel,
+uMView, uCommands, uMouseProfile, uMouseEngine, umainform. Spec §9.8.
+
+End of day
+----------
+User: "thanks a lot for today!!! hamana lives :)"
+- Built today (Day 22): the problem image and the GL upload stall,
+  [Navigation] ClimbUp, zoom at the view centre in the 4-zone mode, the
+  compile fix, display filters steps 1 and 2 (user-tested step 1: "it
+  works very nicely!!"; step 2 still to be compiled and tested).
+- Spec §17: Phase G (sorting) and Phase H "Looking closer" (proposed
+  name, not yet confirmed) added to the roadmap.
+- Next session: compile and test step 2 (Auto click / double-click,
+  the histogram with a selection, Apply filters to a copy, Lock with
+  apply-to-copy); then the magnifier as decided (round lens, relative
+  to the screen, left drag horizontal = magnification, vertical = size,
+  wheel = sharpening off / low / high, wheel click = lock the lens).
+- Waiting for: the new Nikon microscope's files (metadata G2, scale bar
+  G3, 16-bit black / white points).
+
+Evening: user's test round
+--------------------------
+User tested step 1 and 2: "the permanent auto function of filter
+processing is incredible!!! it could be a default setting"; "the 'one
+level up' directory scan does now work, the ini entry climb up is
+efficient". Changes asked for, all done:
+- Filter panel: the pin at the left of the header (next to the window's
+  edge), the lock right of it, then the title.
+- "Mirror left / right" in the filter panel (an inverted microscope's
+  images are mirrored): a toggle like Invert. Geometry in the renderers
+  (GPU: negative x scale; CPU: mirrored copy before the quarter turns);
+  ScreenToImage / ImageToScreen follow, so selection, crop and ROI stay
+  right. Goes with Lock / Reset, [mirrored] in the info line, _mirror and
+  mirrored pixels in "Apply filters to a copy".
+- [Filters] AutoFilter=1 (default on): Auto for every image from the
+  start.
+- Info line: "52 % = 1997 x 1331" (size on screen).
+- "Resize to the size shown (W x H)" (menu, command ResizeToShown):
+  copy / move / save always used the original size; this makes a copy at
+  the shown size (like a crop), which Save / Save as / the sort panel
+  then write. Chosen instead of a size choice inside the save dialogs:
+  it works for the sort panel too, the same way as crop and "apply
+  filters to a copy".
+- Settings screen: "Total Commander side by side" button: MView left,
+  Total Commander right, in [Startup] LastDirectory, else Documents.
+- Review (independent): no compile problems found; fixed: a double-click
+  on a toggle row switched it twice; the "filters not available" note
+  (GPU without shaders) repeated on every image with AutoFilter on (now
+  once); mirrored + 180 degrees made two full copies on the CPU (now
+  one); the Total Commander note says to Save the path first.
+- TestFilters: TestMirror (11 checks), 53 checks in all.
+Units changed: uFilters, uFilterImage, uRenderer, uGLRenderer,
+uFilterPanel, uMView, uCommands, uMouseProfile, uMouseEngine, uConfig,
+uIniEditor, umainform. Spec §9.7, §9.8, §14.

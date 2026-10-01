@@ -120,6 +120,8 @@ type
     maFullscreen, maInfo, maDiagnostics, maMenu,
     maPaste, maSaveImage, maEditMode, maEditOn, maEditOff, maCrop, maRescan,
     maSortPanel, maDeleteImage, maUndo, maSideBySide,
+    maFilterPanel, maLockFilters, maResetFilters,
+    maAutoLevels, maAutoLevelsMode, maApplyFilters, maResizeToShown, maMagnifier,
     maBack, maExit
   );
 
@@ -299,12 +301,14 @@ const
     'Fullscreen', 'Info', 'Diagnostics', 'Menu',
     'Paste', 'SaveImage', 'EditMode', 'EditModeOn', 'EditModeOff', 'CropSelection', 'Rescan',
     'SortPanel', 'DeleteImage', 'Undo', 'SideBySide',
+    'FilterPanel', 'LockFilters', 'ResetFilters',
+    'AutoLevels', 'AutoLevelsMode', 'ApplyFilters', 'ResizeToShown', 'Magnifier',
     'Back', 'Exit');
   ActionCaptions: array[TMouseAction] of string = (
     '(nothing)',
     'Next image', 'Previous image', 'Next folder', 'Previous folder', 'Parent folder',
     'Zoom in (at the mouse)', 'Zoom out (at the mouse)', 'Fit to window',
-    'Original size (100 %)', 'Fit <-> 100 % (at the mouse)',
+    'Original size (100 %, centred)', 'Fit <-> 100 % (centred)',
     'Rotate left 90°', 'Rotate right 90°', 'Turn left 5° (per wheel notch)',
     'Turn right 5° (per wheel notch)',
     'Sort by date', 'Sort by name', 'Sort: date <-> name',
@@ -315,6 +319,9 @@ const
     'Sort panel open / closed', 'Delete image (into the deleted-files folder)',
     'Undo the last copy / move / delete',
     'Side by side with Total Commander (on / off)',
+    'Filter panel open / closed', 'Lock filters on / off', 'Reset the filters',
+    'Auto black / white point (once)', 'Auto black / white point for every image (on / off)',
+    'Apply the filters to a copy', 'Resize to the size shown (a copy)', 'Magnifier on / off',
     'Back (leave a mode, else the settings screen)', 'Exit');
 
   OrderNames: array[TZoneOrder] of string = ('None', 'Date', 'Name');

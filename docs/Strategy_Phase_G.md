@@ -322,6 +322,20 @@ auto contrast (0.35 % of the pixels saturated), on the whole image or, with a se
 Still open: per-channel black / white points (red, green, blue separately) now, or with the
 multichannel microscope files? (Proposal: with the microscope files.)
 
+## Built, step 1 (Day 22; proposed as Phase H, "Looking closer", with the magnifier)
+
+- The seven filters as above, one definition of the maths (`uFilters`) for both renderers. The
+  **shader came with the filters** (not with the magnifier as planned): a GLSL 1.10 fragment
+  shader over the existing textures, so a change costs one frame; the CPU renderer filters its
+  screen-sized part (a table, plus the colour step per pixel).
+- The filter panel at the left edge (`uFilterPanel`), pin `[Filters] Pinned`, a lock in its
+  header as well as "Lock filters" in the right-click menu; wheel / relative drag / double-click
+  as planned; Reset all; `[filtered]` in the info line. Commands `FilterPanel`, `LockFilters`,
+  `ResetFilters`. A crop keeps the filters.
+- Step 2 (built, Day 22): the histogram (image or selection), Auto — click once, double-click for
+  every image (user) — and "Apply filters to a copy". Black / white points are on 8-bit values
+  until 16-bit display comes with the microscope files.
+
 # G5 — Measuring line (decided: only this)
 
 - A **line** drawn with the mouse in edit mode (a mode switch, like the selection frame), showing
@@ -330,7 +344,7 @@ multichannel microscope files? (Proposal: with the microscope files.)
 - **Out of scope:** arrows, callouts, frames, region markers, styles, layers. Figures go to
   PowerPoint or Inkscape.
 
-# G6 — Magnifier (planned, user Day 21)
+# G6 — Magnifier (built Day 23)
 
 Hamana had a magnifier: a lens that follows the mouse and shows the part under it enlarged. The
 user wants it back, **combined with the metadata and measuring**, and with **adaptive sharpening**
@@ -410,6 +424,28 @@ The magnifier needs the renderer to draw a second view of the same texture and M
 **shader** (for sharpening). The filters (G4) are then "more lines in the same shader" for the
 lens and for the whole view. Building the lens first gives the filters a place to be tried on a
 small area, and the magnifier is useful on its own at once.
+
+## Built (Day 23, Phase H)
+
+As decided: round, relative to the screen, follows the mouse, left drag sideways =
+magnification and up / down = size, wheel = sharpening off / low / high (off by default; the
+wheel doesn't change images while the lens is on: "its use is focused"), wheel click = lock.
+GPU: the filter shader also cuts the lens round and sharpens it; CPU: sharpened at the source
+pixels, then enlarged. On / off in the right-click menu, Esc off. Settings in `[Magnifier]`.
+Next for the lens: measuring through it once the metadata (G2) gives the pixel size.
+
+# Next: microscopy (after Day 23)
+
+The general viewer is done (user, Day 23); what is left is microscopy-specific:
+
+- **Scale and measurement:** G2 metadata, G3 scale bar, G5 measuring line. Reference files:
+  modern **Leica SP8** confocal (pixel size in the file / its XML) and **Nikon** images,
+  probably from a Nikon camera body, which knows nothing about the microscope: then a
+  **calibration** per objective (stage micrometer), kept by MView, the objective picked with
+  the mouse.
+- **Provenance (user's idea):** images MView saves get a "Versarite MView" metadata entry
+  listing what was done (source file, crop, resize, filters, mirror). Originals untouched.
+- **Out of scope:** drawing, text and other editing tools (not viewing, keyboard-reliant).
 
 # Principles for Phase G
 

@@ -37,6 +37,10 @@ unit uMView;
     mover), sorting a pasted or cropped image (saved into the folder by
     the save thread), a swipe / wheel click into a slot's folder, and
     the paste from the settings screen (StartWithPaste).
+  - Looking closer (Phase H): FFilterPanel (TFilterPanel, the panel at
+    the left edge) and the display filters FFilters, handed to the
+    renderer. Unlocked, a new image starts unfiltered; "Lock filters"
+    keeps them. A crop keeps them (the same image, closer).
   - The files startup.csv and timing.csv next to MView.exe (appended
     to with [Debug] TimingLog=1). It also writes the mouse profile
     file with the built-in profile if it isn't there yet.
@@ -116,7 +120,8 @@ unit uMView;
                   uImageCache, uJobScheduler, uDirectoryScanner,
                   uRenderer, uAnimation, uMouseProfile, uJobQueue,
                   uIOGate, uMemoryGuard, uImageSaver, uStopwatch,
-                  uSortFolders, uSortPanel, uFileMover
+                  uSortFolders, uSortPanel, uFileMover, uFilters,
+                  uFilterImage, uFilterPanel, uTCFollow, uImageFormats
   Libraries:      Classes, SysUtils, Math, Controls, ExtCtrls,
                   Graphics, Clipbrd, BGRABitmap, BGRABitmapTypes,
                   Forms (implementation: Screen, for the DPI)
@@ -251,7 +256,12 @@ uses
   uSortFolders,
   uSortPanel,
   uSortIcons,
-  uFileMover;
+  uFileMover,
+  uFilters,
+  uFilterImage,
+  uFilterPanel,
+  uTCFollow,
+  uImageFormats;
 
 type
 
@@ -404,6 +414,12 @@ type
     { Pasted from the settings screen: the last session opens behind it
       without replacing it. }
     FKeepScratch: Boolean;
+    { Climbing (Day 22, [Navigation] ClimbUp): the step that ran into the
+      end of the tree, done again once the parent's tree has arrived. }
+    FClimbing: Boolean;
+    FClimbStep: TCommand;
+    FClimbGeneration: Cardinal;
+    FClimbSinceMs: Double;
     FPanelPressButton: TOverlayButton;
     FPanelViewW, FPanelViewH: Integer;
     FPanelScale: Double;
@@ -413,6 +429,53 @@ type
       UpdatePanel (opening reads the icon folder again). }
     FIcons: TSortIcons;
     FPanelWasVisible: Boolean;
+    { Looking closer (Phase H): the filter panel, the display filters,
+      "Lock filters", the file they were set for (a new file resets them
+      unless locked), a crop keeping them, and a press on the panel. }
+    FFilterPanel: TFilterPanel;
+    FFilters: TFilterSettings;
+    FFiltersLocked: Boolean;
+    FFilterFile: string;
+    FKeepFilters: Boolean;
+    FFilterPress: Boolean;
+    { Step 2: Auto for every image (double-click on Auto), and the
+      histogram of what is on screen (or of the edit-mode selection),
+      made again only when that changes (FHistKey). }
+    FAutoOn: Boolean;
+    FHist: THistogram;
+    FHistValid: Boolean;
+    FHistROI: Boolean;
+    FHistKey: string;
+    FHistGen: Cardinal;          { counts Display calls: part of FHistKey }
+    { Locked filters set aside while a filtered copy is shown (it has them
+      in its pixels); back with the next file. }
+    FRestoreFilters: TFilterSettings;
+    FRestorePending: Boolean;
+    FNoShaderNoteShown: Boolean; { "filters not available" said once }
+    { Follow Total Commander (Day 23): asked every PollMs; what it showed
+      last (a change is acted on, not the state: MView's own browsing is
+      never pulled back). Primed: the first answer is only noted. }
+    FFollower: TTCFollower;
+    FFollowMode: Integer;        { 0 off, 1 folder, 2 folder and cursor }
+    FFollowFolder: string;
+    FFollowFile: string;
+    FFollowPrimed: Boolean;
+    FFollowPollMs: Double;
+    FFollowNoteShown: Boolean;
+    { A folder being opened for it: the image its cursor moves to
+      meanwhile is shown when the folder is ready (not opened again). }
+    FFollowOpening: Boolean;
+    FFollowWanted: string;
+    { Total Commander answered the last poll: MView follows it now
+      ("[TC]" in the info line; subfolders off). }
+    FFollowing: Boolean;
+    { The magnifier (Phase H, G6): its state is the renderer's (Lens);
+      a left drag in progress (magnification sideways, size up / down)
+      starts from these. }
+    FLensDragging: Boolean;
+    FLensDragX, FLensDragY: Integer;
+    FLensDragMag, FLensDragRadius: Double;
+    FLensWheel: Integer;         { wheel parts not yet a notch (fine wheels) }
 
     procedure ShowCurrent;
     procedure UpdateWanted;
@@ -466,6 +529,7 @@ type
     procedure SortScratch(ASlot: Integer; AMove: Boolean);
     procedure SortScratchSaved;
     procedure OpenSlotFolder(ASlot: Integer);
+    procedure ClimbUp(ACommand: TCommand);
     function SecondSlotClick(ASlot: Integer; AButton: TOverlayButton): Boolean;
     procedure QueueJob(var AJob: TFileJob);
     procedure StartMove(var AJob: TFileJob);
@@ -481,6 +545,26 @@ type
     function PanelSlotIcon(ASlot, ASize: Integer): TBGRABitmap;
     function PanelSlotMissing(ASlot: Integer): Boolean;
     procedure HandleIconWritten(const AResult: TFileJobResult);
+    { Filters (Phase H). }
+    procedure UpdateFilterPanel;
+    procedure FiltersForNewImage(const AImage: IDecodedImage);
+    function FilterMark: string;
+    function ColourMark: string;
+    procedure UpdateFollowBadge;
+    function RefreshHistogram: Boolean;
+    procedure ApplyAuto(AReport: Boolean);
+    procedure PollTotalCommander;
+    function HandleLensMouse(AKind: TOverlayMouseKind; AButton: TOverlayButton;
+      AX, AY, AWheel: Integer; AButtonDown: Boolean): Boolean;
+    procedure SetLens(const ALens: TLensState);
+    procedure KeepLensSettings;
+    { [Navigation] Recursive, except while following Total Commander
+      (user, Day 23: then always just the folder). }
+    function UseRecursive: Boolean;
+    procedure UserFilters(const AFilters: TFilterSettings);
+    function BestPixels: IDecodedImage;
+    function HandleFilterMouse(AKind: TOverlayMouseKind; AButton: TOverlayButton;
+      AX, AY, AWheel: Integer; AButtonDown, ADouble: Boolean): Boolean;
   public
     constructor Create;
     destructor Destroy; override;
@@ -500,7 +584,10 @@ type
 
     { Opens a file or a folder (through the scanner). ASelectFile: a
       file inside the folder to start on (resuming the last session). }
-    procedure OpenMedia(const APath: string; const ASelectFile: string = '');
+    { AKeepCache: the same files seen from a folder higher up (Parent
+      folder, climbing): the decoded images stay usable. }
+    procedure OpenMedia(const APath: string; const ASelectFile: string = '';
+      AKeepCache: Boolean = False);
 
     { UI thread, called by the form's timer: runs queued deliveries
       from the worker and scanner threads that are still waiting. }
@@ -603,6 +690,49 @@ type
       the icon folder (an older one becomes <name>_previous.ico). }
     function CanMakeIcon: Boolean;
     procedure MakeIconFromImage;
+
+    { Looking closer (Phase H, spec §9.8): the display filters. SetFilters
+      shows them (display only; the image is not changed). }
+    procedure SetFilters(const AFilters: TFilterSettings);
+    property Filters: TFilterSettings read FFilters;
+    { "Lock filters": they stay for the next images. }
+    procedure SetFiltersLocked(AValue: Boolean);
+    property FiltersLocked: Boolean read FFiltersLocked;
+    { The filter panel opened by the menu (stays until the mouse has been
+      on it), or closed. }
+    procedure ShowFilterPanel(AShow: Boolean);
+    function FilterPanelVisible: Boolean;
+    { Step 2: Auto for every image on / off (black / white point from
+      each image's histogram, or the selection's). }
+    procedure SetAutoOn(AValue: Boolean);
+    property AutoOn: Boolean read FAutoOn;
+    { "Apply filters to a copy": a new image (like Crop) with the filters
+      in its pixels, named after them; then Save or the sort panel. }
+    function CanApplyFilters: Boolean;
+    procedure ApplyFiltersToCopy;
+    { "Resize to the size shown" (user, Day 22: copy / move / save always
+      wrote the original size): a new image (like Crop) at the size it has
+      on screen (the info line's W x H); Save / Save as / the sort panel
+      then write it. ShownSizeText: "1997 x 1331", '' if none. }
+    function CanResizeToShown: Boolean;
+    function ShownSizeText: string;
+    procedure ResizeToShown;
+
+    { Follow Total Commander (Day 23, [Sort] FollowTotalCommander): 0 =
+      off, 1 = its active panel's folder, 2 = and the image under its
+      cursor (MView as its viewer). Saved at once. }
+    procedure SetFollowMode(AMode: Integer);
+    property FollowMode: Integer read FFollowMode;
+
+    { The magnifier (Phase H, G6; user, Day 21 / 23): a round lens that
+      follows the mouse; left drag sideways = magnification (relative to
+      the screen), up / down = size; wheel = sharpening off / low / high;
+      wheel click = lock it where it is (the mouse is free); Esc or the
+      menu = off. Settings from [Magnifier], kept on exit. }
+    procedure SetMagnifier(AOn: Boolean);
+    function MagnifierOn: Boolean;
+    { The view's mouse cursor: a cross while the lens follows it. }
+    function ViewCursor: TCursor;
   end;
 
 implementation
@@ -611,7 +741,8 @@ uses
   Forms,
   FPWritePNG,
   uMouseEngine,
-  uIconFile;
+  uIconFile,
+  uTotalCommander;
 
 const
   { Upper limit for skipping undecodable files in one go (only used
@@ -686,6 +817,7 @@ begin
     watchdog may end the process (uWatchdog), and they are saved. }
   FConfig.ShowInfo := FRenderer.ShowInfo;
   FConfig.ShowDiagnostics := FRenderer.ShowDiagnostics;
+  KeepLensSettings;
   FConfig.SortMode := FNavigator.SortMode;
   FConfig.Save;
 
@@ -710,6 +842,8 @@ begin
   FNoPreview.Free;
   FMouseProfile.Free;
   FPanel.Free;
+  FFilterPanel.Free;
+  FFollower.Free;
   FIcons.Free;
   FConfig.Free;
   inherited Destroy;
@@ -797,6 +931,7 @@ begin
   FNavigator.Recursive := FConfig.Recursive;
   FNavigator.WrapAround := FConfig.WrapAround;
   FNavigator.WrapScope := FConfig.WrapScope;
+  FNavigator.ClimbUp := FConfig.ClimbUp;
   FNavigator.SetSortMode(FConfig.SortMode);
 
   FRenderer.ZoomStepPercent := FConfig.ZoomStepPercent;
@@ -845,6 +980,20 @@ begin
   FPanel.OnSlotMissing := @PanelSlotMissing;
   if FPanel.Pinned then
     FPanel.Show;
+
+  { The filter panel (Phase H), at the left edge; the same edge timing. }
+  FFilters := NeutralFilters;
+  FFilterPanel := TFilterPanel.Create;
+  FFilterPanel.EdgeDelayMs := FConfig.SortEdgeDelayMs;
+  FFilterPanel.EdgeWidth := FConfig.SortEdgeWidth;
+  FFilterPanel.Pinned := FConfig.FilterPinned;
+  if FFilterPanel.Pinned then
+    FFilterPanel.Show;
+  FFollowMode := FConfig.FollowTotalCommander;
+  UpdateFollowBadge;    { there from the start, see-through until it follows }
+  { [Filters] AutoFilter: Auto for every image from the start. }
+  FAutoOn := FConfig.AutoFilter;
+  FFilterPanel.AutoOn := FAutoOn;
 end;
 
 procedure TMView.AttachView(ASurface: TWinControl; ARenderer: TRenderer);
@@ -859,11 +1008,19 @@ begin
   ARenderer.OverlaySolid := FConfig.OverlaySolid;
   ARenderer.SetOverlayColorName(FConfig.OverlayColor);
   ARenderer.EditMode := FRenderer.EditMode;
+  ARenderer.SetFilters(FFilters);
+  ARenderer.Lens := FRenderer.Lens;
+  ARenderer.SetBadge(FRenderer.BadgeText, FRenderer.BadgeStyle);
+  ARenderer.BadgeOn := FRenderer.BadgeOn;
+  FLensDragging := False;
+  if ARenderer.Lens.Active then
+    ASurface.Cursor := crCross;
   ARenderer.OnImagePainted := @HandleImagePainted;
   ARenderer.SetMessage('');
   FRenderer.Free;
   FRenderer := ARenderer;
   UpdatePanel;
+  UpdateFilterPanel;
 end;
 
 procedure TMView.SetDisplaySize(AWidth, AHeight: Integer);
@@ -898,9 +1055,11 @@ end;
   lists the start folder first (HandleStartReady: the first image goes
   to a worker at once), then scans the tree (HandleTreeReady). Nothing
   here touches the disk (Day 19). }
-procedure TMView.OpenMedia(const APath: string; const ASelectFile: string);
+procedure TMView.OpenMedia(const APath: string; const ASelectFile: string;
+  AKeepCache: Boolean);
 begin
   FKeepScratch := False;   { StartWithPaste sets it again, after this }
+  FClimbing := False;      { ClimbUp sets it again, after this }
   { The scanner is stuck in an earlier request: a new one wouldn't be
     looked at. }
   if FScanner.LastAliveAgeMs > ScannerStuckMs then
@@ -913,8 +1072,11 @@ begin
   FLastNavMs := 0;
   FStepCount := 0;
   { New lists may name other versions of the files. }
-  FCache.Clear;
-  FScanGeneration := FScanner.Request(APath, ASelectFile, FConfig.Recursive);
+  if not AKeepCache then
+    FCache.Clear;
+  { Following Total Commander: its folder only, no subfolders. }
+  FNavigator.Recursive := UseRecursive;
+  FScanGeneration := FScanner.Request(APath, ASelectFile, UseRecursive);
 
   ShowStatus('opening ' + APath + ' ...', 0);
   if not FNavigator.HasCurrentImage then
@@ -933,9 +1095,13 @@ begin
   try
     if AStart.Generation <> FScanGeneration then
       Exit;   { from an older request }
+    { Following Total Commander: the folder asked for is answered (also
+      when it wasn't found). }
+    FFollowOpening := False;
     ShowStatus('', 0);
     if not AStart.Found then
     begin
+      FClimbing := False;
       if FKeepScratch and FShowingPaste then
         ShowStatus('not found: ' + AStart.RequestedPath, 6000)
       else
@@ -946,6 +1112,10 @@ begin
 
     FNavigator.OpenListed(AStart.Root, AStart.TargetDirectory, AStart.Listing,
       AStart.TargetFile);
+    { Following Total Commander: its cursor moved on meanwhile. }
+    if (FFollowWanted <> '') and not SameText(FFollowWanted, FNavigator.CurrentFileName) then
+      FNavigator.SelectFile(FFollowWanted);
+    FFollowWanted := '';
     { Moves still under way (sorting): listed before they happened. }
     for I := 0 to High(FMoves) do
       FNavigator.RemoveFile(FMoves[I].Source);
@@ -1013,7 +1183,8 @@ begin
   begin
     FShownFile := FileName;
     FShownSinceMs := NowMs;
-    FFullAllowed := FConfig.RefineDelayMs <= 0;
+    { The magnifier wants the real pixels at once. }
+    FFullAllowed := (FConfig.RefineDelayMs <= 0) or MagnifierOn;
   end;
 
   Cached := FCache.GetByName(FileName);
@@ -1234,6 +1405,10 @@ end;
 procedure TMView.Display(const AImage: IDecodedImage; AUpgrade: Boolean);
 begin
   FCurrentImage := AImage;
+  Inc(FHistGen);
+  { Another file: unfiltered again, unless the filters are locked. }
+  if not AUpgrade then
+    FiltersForNewImage(AImage);
   FRenderer.SetImage(AImage, AUpgrade);
   if (FCommandMs > 0) and not AUpgrade then
   begin
@@ -1244,6 +1419,10 @@ begin
     of the same image keeps it: the same original pixels.) }
   if not AUpgrade then
     ClearSelection;
+  { Auto for every image: this image's own black / white point (also
+    when its better version arrives). }
+  if FAutoOn and Assigned(AImage) and not AImage.IsError then
+    ApplyAuto(False);
   { Animated: play (not while skimming past it). }
   if Assigned(AImage) and (AImage.Animation <> nil) and not FSkim then
     StartAnimation(AImage)
@@ -1470,12 +1649,30 @@ begin
     UpdateInfo;
     Refresh;
   end;
+
+  { Climbing: the step that ran into the end, now in the larger tree. }
+  if FClimbing and (AGeneration = FClimbGeneration) then
+  begin
+    FClimbing := False;
+    ShowStatus('browsing from ' + FNavigator.RootDirectory + '  (one level up)', 4000);
+    Navigate(FClimbStep);
+  end;
 end;
 
 procedure TMView.Navigate(ACommand: TCommand);
 var
   Moved, SkimEnded: Boolean;
 begin
+  { Climbing: the folder above is being read. Steps meanwhile are not
+    done in the old tree (they would climb again and again); the last
+    one is done once the new tree is there. }
+  if FClimbing and (NowMs - FClimbSinceMs > ScannerStuckMs) then
+    FClimbing := False;      { the folder above never came: step as usual }
+  if FClimbing then
+  begin
+    FClimbStep := ACommand;
+    Exit;
+  end;
   FCommandMs := NowMs;
   FLastStep := ACommand;
   if ACommand in [cmdPreviousImage] then
@@ -1500,10 +1697,40 @@ begin
     Moved := False;
   end;
 
+  { The end of the tree with ClimbUp: one level up, and the same step
+    there once its tree is known (Day 22). }
+  if (not Moved) and FNavigator.ClimbWanted then
+  begin
+    if SkimEnded then
+      LeaveSkim;
+    ClimbUp(ACommand);
+    Exit;
+  end;
+
   if Moved then
     ShowCurrent
   else if SkimEnded then
     LeaveSkim;
+end;
+
+{ The root's parent becomes the root (the current image stays on
+  screen); when its tree arrives, ACommand is done again from there: the
+  next / previous folder is then a neighbour of the old root. Repeats by
+  itself if that is the end again (up to one level below the drive). }
+procedure TMView.ClimbUp(ACommand: TCommand);
+var
+  Root, Parent: string;
+begin
+  Root := ExcludeTrailingPathDelimiter(FNavigator.RootDirectory);
+  Parent := ExcludeTrailingPathDelimiter(ExtractFileDir(Root));
+  if (Parent = '') or SameText(Parent, Root) then
+    Exit;
+  OpenMedia(Parent, FNavigator.CurrentFileName, True);
+  FClimbing := True;
+  FClimbSinceMs := NowMs;
+  FClimbStep := ACommand;
+  FClimbGeneration := FScanGeneration;
+  ShowStatus('end of ' + Root + ': one level up, reading ' + Parent + ' ...', 0);
 end;
 
 { Phase E (spec §6): called for every navigation step, before the
@@ -1635,9 +1862,12 @@ begin
       FRenderer.RotateBy(AArgs.Value);
 
     cmdToggleFit:
+      { 100 % centred in the window, not at the mouse (user, Day 23: a
+        small image went to the top left corner, a large one was hard
+        to find). }
       if FRenderer.IsFitView then
       begin
-        FRenderer.OriginalSizeAt(AArgs.X, AArgs.Y);
+        FRenderer.OriginalSize;
         AllowFull;
       end
       else
@@ -1677,7 +1907,9 @@ begin
 
     cmdOriginalSizeAt:
       begin
-        FRenderer.OriginalSizeAt(AArgs.X, AArgs.Y);
+        { Centred too (user, Day 23: only the zoom mode zooms at the
+          mouse). }
+        FRenderer.OriginalSize;
         AllowFull;
       end;
 
@@ -1744,6 +1976,23 @@ begin
     cmdSideBySide:
       ;   { the main form does it (windows are its business) }
 
+    cmdFilterPanel:
+      ShowFilterPanel(not FilterPanelVisible);
+    cmdLockFilters:
+      SetFiltersLocked(not FFiltersLocked);
+    cmdResetFilters:
+      UserFilters(NeutralFilters);
+    cmdAutoLevels:
+      ApplyAuto(True);
+    cmdAutoLevelsMode:
+      SetAutoOn(not FAutoOn);
+    cmdApplyFilters:
+      ApplyFiltersToCopy;
+    cmdResizeToShown:
+      ResizeToShown;
+    cmdMagnifier:
+      SetMagnifier(not MagnifierOn);
+
     cmdExit:
       begin
         if Assigned(FOnExitRequest) then
@@ -1794,6 +2043,7 @@ begin
       Text := Text + '     saved as ' + FPasteSavedAs
     else
       Text := Text + '     not saved (menu: Save image)';
+    Text := Text + FilterMark;
     if FStatusNote <> '' then
       Text := Text + '     ' + FStatusNote;
     FRenderer.InfoText := Text;
@@ -1829,6 +2079,7 @@ begin
     Text := Text + '     scanning folders ...';
   if Assigned(FCurrentImage) and (FCurrentImage.FrameCount > 1) then
     Text := Text + Format('     animated, %d frames', [FCurrentImage.FrameCount]);
+  Text := Text + FilterMark;
   if FStatusNote <> '' then
     Text := Text + '     ' + FStatusNote;
 
@@ -1889,6 +2140,10 @@ begin
 
   if FConfig.DecodeDelayMs > 0 then
     Text := Text + Format('     (+%d ms simulated delay)', [FConfig.DecodeDelayMs]);
+
+  { Following Total Commander: what it answered last. }
+  if (FFollowMode > 0) and Assigned(FFollower) and (FFollower.Info <> '') then
+    Text := Text + '     TC ' + FFollower.Info;
 
   FRenderer.DiagnosticsText := Text;
 end;
@@ -2032,7 +2287,7 @@ begin
     Exit;
   end;
   ShowStatus('browsing from ' + Parent, 4000);
-  OpenMedia(Parent, FNavigator.CurrentFileName);
+  OpenMedia(Parent, FNavigator.CurrentFileName, True);
 end;
 
 procedure TMView.ShowZone(AZone: Integer);
@@ -2312,7 +2567,13 @@ begin
   if Img.Quality < qlFull then
     Note := '  (from the quick view: the full image wasn''t loaded yet)';
   Angle := FRenderer.View.Angle;
-  ShowScratch(Cropped, 'Cropped from ' + SourceName + Note, SourceName + '_crop');
+  { The same image, closer: the filters stay (Phase H). }
+  FKeepFilters := True;
+  try
+    ShowScratch(Cropped, 'Cropped from ' + SourceName + Note, SourceName + '_crop');
+  finally
+    FKeepFilters := False;
+  end;
   { The same way round as before, fitted to the screen. }
   if Angle <> 0 then
     FRenderer.RotateBy(Angle);
@@ -2321,13 +2582,17 @@ begin
 end;
 
 { Esc (Back), hard-wired (user, 2026-09-27): an open sort panel closes
-  first (Phase G), then edit mode ends;
+  first (Phase G), then the filter panel (Phase H), then edit mode ends;
   otherwise back to the settings editor (the start screen). Only there
   does Esc end MView. (A zoom / rotate mode is ended by the engine.) }
 procedure TMView.GoBack;
 begin
   if Assigned(FPanel) and FPanel.Visible then
     ShowSortPanel(False)
+  else if Assigned(FFilterPanel) and FFilterPanel.Visible then
+    ShowFilterPanel(False)
+  else if MagnifierOn then
+    SetMagnifier(False)
   else if FEditMode then
     SetEditMode(False)
   else if Assigned(FOnSettingsRequest) then
@@ -2617,6 +2882,11 @@ begin
   if FSkim and (NowMs - FLastNavMs >= FConfig.SkimExitMs) then
     LeaveSkim;
 
+  { Tiles of a large image still going to the GPU: keep painting (safety
+    net; the renderer asks for the next frame itself, Day 22). }
+  if FRenderer.IsUploading then
+    Refresh;
+
   { Reads that don't come back (Day 19). }
   if NowMs - FLastStuckCheckMs >= 500 then
   begin
@@ -2631,6 +2901,34 @@ begin
     SyncPanelLayout;
     if FPanel.Tick(NowMs) then
       UpdatePanel;
+  end;
+  if Assigned(FFilterPanel) then
+  begin
+    { A GPU without shaders finds out at its first filtered paint. }
+    if FFilterPanel.Available <> FRenderer.FiltersAvailable then
+    begin
+      FFilterPanel.Available := FRenderer.FiltersAvailable;
+      UpdateFilterPanel;
+      if not FFilterPanel.Available and not ColourNeutral(FFilters) then
+        ShowStatus('filters: not available with this graphics driver (UseGPU=0 in MView.ini shows them)', 6000);
+    end;
+    if FFilterPanel.Tick(NowMs) then
+      UpdateFilterPanel;
+    { The histogram follows the image and the selection (while it is
+      seen, or Auto is on: then the points follow too). }
+    if (FFilterPanel.Visible or FAutoOn) and RefreshHistogram then
+    begin
+      if FAutoOn then
+        ApplyAuto(False);
+      UpdateFilterPanel;
+    end;
+  end;
+
+  { Follow Total Commander: a few times a second. }
+  if (FFollowMode > 0) and (NowMs - FFollowPollMs >= 200) then
+  begin
+    FFollowPollMs := NowMs;
+    PollTotalCommander;
   end;
 
   { The pause before the full-size decode is over. }
@@ -2745,6 +3043,11 @@ begin
   FPanelScale := Scale;
   FPanel.SetViewSize(W, H, Scale);
   UpdatePanel;
+  if Assigned(FFilterPanel) then
+  begin
+    FFilterPanel.SetViewSize(W, H, Scale);
+    UpdateFilterPanel;
+  end;
 end;
 
 { Hands the panel's picture (or none, while closed) to the renderer. }
@@ -2777,6 +3080,19 @@ begin
   if FPanel = nil then
     Exit;
   SyncPanelLayout;
+  { The "TC" label (bottom right): a click cycles following Total
+    Commander off / its folder / and its cursor (user, Day 23). }
+  if (AKind = omDown) and (AButton = obLeft) and FRenderer.BadgeHit(AX, AY) then
+  begin
+    SetFollowMode((FFollowMode + 1) mod 3);
+    Exit(True);
+  end;
+  { The filter panel (left edge) first. }
+  if HandleFilterMouse(AKind, AButton, AX, AY, AWheel, AButtonDown, ADouble) then
+    Exit(True);
+  { The magnifier (not over the open sort panel). }
+  if HandleLensMouse(AKind, AButton, AX, AY, AWheel, AButtonDown) then
+    Exit(True);
   case AKind of
     omMove:
       if FPanel.NoteMouse(AX, AY, AButtonDown, NowMs) then
@@ -3433,11 +3749,977 @@ end;
 
 procedure TMView.SortPanelMouseGone;
 begin
+  if Assigned(FFilterPanel) then
+  begin
+    FFilterPanel.MouseGone(NowMs);
+    if FFilterPanel.Visible then
+      UpdateFilterPanel;
+  end;
   if FPanel = nil then
     Exit;
   FPanel.MouseGone(NowMs);
   if FPanel.Visible then
     UpdatePanel;
+end;
+
+{ ---- Looking closer (Phase H): the display filters ------------------- }
+
+procedure TMView.SetFilters(const AFilters: TFilterSettings);
+var
+  WasNeutral: Boolean;
+begin
+  WasNeutral := ColourNeutral(FFilters);
+  FFilters := AFilters;
+  FRenderer.SetFilters(FFilters);
+  if Assigned(FFilterPanel) then
+  begin
+    FFilterPanel.SetFilters(FFilters);
+    UpdateFilterPanel;
+  end;
+  if WasNeutral and not ColourNeutral(FFilters) and not FRenderer.FiltersAvailable
+    and not FNoShaderNoteShown then
+  begin
+    FNoShaderNoteShown := True;
+    ShowStatus('filters: not available with this graphics driver (UseGPU=0 in MView.ini shows them)', 6000);
+  end;
+  UpdateInfo;
+  UpdateDiagnostics;
+  Refresh;
+end;
+
+procedure TMView.SetFiltersLocked(AValue: Boolean);
+begin
+  FFiltersLocked := AValue;
+  if Assigned(FFilterPanel) then
+  begin
+    FFilterPanel.Locked := AValue;
+    UpdateFilterPanel;
+  end;
+  if AValue then
+    ShowStatus('filters locked: they stay for the next images', 3000)
+  else
+    ShowStatus('filters unlocked: the next image starts unfiltered', 3000);
+  UpdateInfo;
+  Refresh;
+end;
+
+procedure TMView.ShowFilterPanel(AShow: Boolean);
+begin
+  if FFilterPanel = nil then
+    Exit;
+  SyncPanelLayout;
+  if AShow then
+    FFilterPanel.Show(True)
+  else
+    FFilterPanel.Hide;
+  UpdateFilterPanel;
+end;
+
+function TMView.FilterPanelVisible: Boolean;
+begin
+  Result := Assigned(FFilterPanel) and FFilterPanel.Visible;
+end;
+
+{ Hands the filter panel's picture (or none) to the renderer. }
+procedure TMView.UpdateFilterPanel;
+var
+  Bmp: TBGRABitmap;
+begin
+  if FFilterPanel = nil then
+    Exit;
+  Bmp := FFilterPanel.Bitmap;
+  if Bmp = nil then
+    FRenderer.SetFilterPanel(nil, 0, 0, 0)
+  else
+    FRenderer.SetFilterPanel(Bmp, FFilterPanel.Left, FFilterPanel.Top, FFilterPanel.Version);
+  Refresh;
+end;
+
+{ A new file on screen: the filters go back to neutral, unless they are
+  locked or a crop keeps them. The quick view, screen copy and full
+  image of one file count as one. }
+procedure TMView.FiltersForNewImage(const AImage: IDecodedImage);
+var
+  Name: string;
+begin
+  if AImage = nil then
+    Exit;
+  Name := AImage.Key.FileName;
+  if SameText(Name, FFilterFile) then
+    Exit;
+  FFilterFile := Name;
+  { Leaving a filtered copy: the locked filters come back. }
+  if FRestorePending and not FKeepFilters then
+  begin
+    FRestorePending := False;
+    if FFiltersLocked then
+    begin
+      FFilters := FRestoreFilters;
+      FRenderer.SetFilters(FFilters);
+      if Assigned(FFilterPanel) then
+      begin
+        FFilterPanel.SetFilters(FFilters);
+        UpdateFilterPanel;
+      end;
+      Exit;
+    end;
+  end;
+  if FKeepFilters or FFiltersLocked or FiltersNeutral(FFilters) then
+    Exit;
+  FFilters := NeutralFilters;
+  FRenderer.SetFilters(FFilters);
+  if Assigned(FFilterPanel) then
+  begin
+    FFilterPanel.SetFilters(FFilters);
+    UpdateFilterPanel;
+  end;
+end;
+
+function TMView.ShownSizeText: string;
+var
+  W, H: Integer;
+begin
+  Result := '';
+  if Assigned(FCurrentImage) and not FCurrentImage.IsError and FRenderer.ShownSize(W, H) then
+    Result := Format('%d x %d', [W, H]);
+end;
+
+function TMView.CanResizeToShown: Boolean;
+var
+  W, H: Integer;
+  Img: IDecodedImage;
+begin
+  Img := FCurrentImage;
+  Result := Assigned(Img) and not Img.IsError and FRenderer.ShownSize(W, H)
+    and ((W <> ImageWidth(Img)) or (H <> ImageHeight(Img)));
+end;
+
+{ A copy at the size on screen (whole image, not just the visible part;
+  not turned, the filters stay on the display as for a crop). }
+procedure TMView.ResizeToShown;
+var
+  Img, Resized: IDecodedImage;
+  Src, Bmp: TBGRABitmap;
+  W, H: Integer;
+  Angle: Double;
+  Key: TImageKey;
+  Reason, SourceName, Note: string;
+  Mode: TResampleMode;
+  OldCursor: TCursor;
+begin
+  if not CanResizeToShown then
+  begin
+    ShowStatus('resize: the image is shown at its own size already', 3000);
+    Exit;
+  end;
+  FRenderer.ShownSize(W, H);
+  Img := BestPixels;
+  if Img = nil then
+  begin
+    ShowStatus('resize: the image is not in memory (yet)', 4000);
+    Exit;
+  end;
+  if not DecodeFits(W, H, 0, Reason) then
+  begin
+    ShowStatus('resize: ' + Reason, 6000);
+    Exit;
+  end;
+  Src := Img.Bitmap;
+  { Smooth both ways: no aliasing when smaller, no blocks when larger. }
+  Mode := rmFineResample;
+  OldCursor := Screen.Cursor;
+  Screen.Cursor := crHourGlass;
+  try
+    if (W = Src.Width) and (H = Src.Height) then
+      Bmp := Src.Duplicate as TBGRABitmap
+    else
+      Bmp := Src.Resample(W, H, Mode) as TBGRABitmap;
+  finally
+    Screen.Cursor := OldCursor;
+  end;
+
+  if FShowingPaste then
+    SourceName := FScratchPrefix
+  else
+    SourceName := ChangeFileExt(ExtractFileName(FCurrentImage.Key.FileName), '');
+  Key.FileName := SourceName + Format('_%dx%d', [W, H]);
+  Key.FileSize := 0;
+  Key.FileTime := Now;
+  Resized := TDecodedImage.Create(Key, qlFull, Bmp, nil, 0, 0, W, H);
+  Note := '';
+  if (Img.Quality < qlFull) and ((W > Src.Width) or (H > Src.Height)) then
+    Note := '  (from the quick view: the full image wasn''t loaded yet)';
+  Angle := FRenderer.View.Angle;
+  { The same image, another size: the filters stay (as for a crop). }
+  FKeepFilters := True;
+  try
+    ShowScratch(Resized, Format('Resized to %d x %d: ', [W, H]) + SourceName + Note,
+      SourceName + Format('_%dx%d', [W, H]));
+  finally
+    FKeepFilters := False;
+  end;
+  if Angle <> 0 then
+    FRenderer.RotateBy(Angle);
+  UpdateInfo;
+  Refresh;
+end;
+
+{ ---- The magnifier (Phase H, G6) --------------------------------------- }
+
+const
+  { Typed: Min / Max / EnsureRange then pick the Double versions. }
+  LensMinMag: Double = 1.25;
+  LensMaxMag: Double = 32.0;
+  LensMinRadius: Double = 40;
+  { Left drag: this many px sideways double / halve the magnification. }
+  LensMagDragPx: Double = 150;
+
+function TMView.MagnifierOn: Boolean;
+begin
+  Result := FRenderer.Lens.Active;
+end;
+
+function TMView.ViewCursor: TCursor;
+begin
+  if MagnifierOn and not FRenderer.Lens.Locked then
+    Result := crCross
+  else
+    Result := crDefault;
+end;
+
+procedure TMView.SetLens(const ALens: TLensState);
+begin
+  FRenderer.Lens := ALens;
+  UpdateInfo;
+  Refresh;
+end;
+
+{ The lens' magnification, size and sharpening into [Magnifier] (saved
+  with the other settings on exit). }
+procedure TMView.KeepLensSettings;
+var
+  L: TLensState;
+begin
+  L := FRenderer.Lens;
+  if L.Mag <= 0 then
+    Exit;     { never switched on: as read }
+  FConfig.LensMagPercent := Round(L.Mag * 100);
+  FConfig.LensSize := Round(2 * L.Radius);
+  FConfig.LensSharpen := L.Sharpen;
+end;
+
+procedure TMView.SetMagnifier(AOn: Boolean);
+var
+  L: TLensState;
+  P: TPoint;
+begin
+  L := FRenderer.Lens;
+  if AOn = L.Active then
+    Exit;
+  FLensDragging := False;
+  if AOn then
+  begin
+    if L.Mag <= 0 then
+    begin
+      { First time: as left last time ([Magnifier]). }
+      L.Mag := EnsureRange(FConfig.LensMagPercent / 100, LensMinMag, LensMaxMag);
+      L.Radius := Max(LensMinRadius, FConfig.LensSize / 2);
+      { Not larger than the window. }
+      if Assigned(FSurface) then
+        L.Radius := Min(L.Radius, Max(LensMinRadius,
+          Min(FSurface.ClientWidth, FSurface.ClientHeight) / 2));
+      L.Sharpen := EnsureRange(FConfig.LensSharpen, 0, 2);
+    end;
+    L.Active := True;
+    L.Locked := False;
+    { Where the mouse is (or the middle). }
+    if Assigned(FSurface) then
+    begin
+      P := FSurface.ScreenToClient(Mouse.CursorPos);
+      if (P.X < 0) or (P.Y < 0) or (P.X >= FSurface.ClientWidth)
+        or (P.Y >= FSurface.ClientHeight) then
+        P := Point(FSurface.ClientWidth div 2, FSurface.ClientHeight div 2);
+      L.X := P.X;
+      L.Y := P.Y;
+      FSurface.Cursor := crCross;
+    end;
+    { The real pixels: the full image now. }
+    AllowFull;
+    ShowStatus('magnifier: left drag <-> magnification, up / down size; wheel: sharpen; '
+      + 'wheel click: lock; Esc: off', 6000);
+  end
+  else
+  begin
+    L.Active := False;
+    if Assigned(FSurface) then
+      FSurface.Cursor := crDefault;
+    ShowStatus('', 0);
+  end;
+  SetLens(L);
+  KeepLensSettings;
+end;
+
+{ The mouse while the lens is on: True = taken. Over the open sort panel
+  the panel has it. Right button: the menu, as always. Locked: only the
+  wheel click (unlock) and the wheel. }
+function TMView.HandleLensMouse(AKind: TOverlayMouseKind; AButton: TOverlayButton;
+  AX, AY, AWheel: Integer; AButtonDown: Boolean): Boolean;
+var
+  L: TLensState;
+  MaxRadius: Double;
+  P: TPoint;
+begin
+  Result := False;
+  L := FRenderer.Lens;
+  if not L.Active then
+    Exit;
+  { A drag goes on wherever the mouse goes, until the left button is
+    released (or found up: the release got lost, e.g. Alt+Tab). Other
+    presses meanwhile are taken and ignored. }
+  if FLensDragging then
+  begin
+    case AKind of
+      omDown:
+        Result := True;
+      omMove:
+        if not AButtonDown then
+          FLensDragging := False
+        else
+        begin
+          Result := True;
+          MaxRadius := 2000;
+          if Assigned(FSurface) then
+            MaxRadius := Max(LensMinRadius, Min(FSurface.ClientWidth, FSurface.ClientHeight) / 2);
+          L.Mag := EnsureRange(FLensDragMag * Power(2, (AX - FLensDragX) / LensMagDragPx),
+            LensMinMag, LensMaxMag);
+          { Up = larger. }
+          L.Radius := EnsureRange(FLensDragRadius - (AY - FLensDragY), LensMinRadius, MaxRadius);
+          SetLens(L);
+        end;
+      omUp:
+        if AButton <> obLeft then
+          Result := True
+        else
+        begin
+          Result := True;
+          FLensDragging := False;
+          { The mouse back to the lens' centre, so it doesn't jump. }
+          if Assigned(FSurface) then
+          begin
+            P := FSurface.ClientToScreen(Point(Round(L.X), Round(L.Y)));
+            Mouse.CursorPos := P;
+          end;
+          KeepLensSettings;
+        end;
+    end;
+    Exit;
+  end;
+
+  { The open panels keep their own mouse (the lens stays where it was). }
+  if (Assigned(FPanel) and FPanel.Contains(AX, AY))
+    or (Assigned(FFilterPanel) and FFilterPanel.Contains(AX, AY)) then
+    Exit;
+
+  case AKind of
+    omMove:
+      if not L.Locked then
+      begin
+        L.X := AX;
+        L.Y := AY;
+        SetLens(L);
+        { Not taken: the engine may still show zones etc. }
+      end;
+
+    omWheel:
+      { The wheel: sharpening (user: "the lens is not a casual gimmick,
+        its use is focused"). Not the tilt (AWheel 0: folder steps), and
+        not in the zoom / rotate modes (theirs). A notch at a time (fine
+        wheels send parts). }
+      if (AWheel <> 0) and (FRenderer.InputMode = imBrowse) then
+      begin
+        Result := True;
+        if (FLensWheel <> 0) and (Sign(FLensWheel) <> Sign(AWheel)) then
+          FLensWheel := 0;
+        Inc(FLensWheel, AWheel);
+        if Abs(FLensWheel) >= 120 then
+        begin
+          if FLensWheel > 0 then
+            L.Sharpen := (L.Sharpen + 1) mod 3
+          else
+            L.Sharpen := (L.Sharpen + 2) mod 3;
+          FLensWheel := 0;
+          SetLens(L);
+          KeepLensSettings;
+        end;
+      end;
+
+    omDown:
+      case AButton of
+        obMiddle:
+          begin
+            { Wheel click: lock where it is / follow the mouse again. }
+            Result := True;
+            L.Locked := not L.Locked;
+            if not L.Locked then
+            begin
+              L.X := AX;
+              L.Y := AY;
+            end;
+            SetLens(L);
+            if Assigned(FSurface) then
+              FSurface.Cursor := ViewCursor;
+          end;
+        obLeft:
+          if not L.Locked then
+          begin
+            Result := True;
+            FLensDragging := True;
+            FLensDragX := AX;
+            FLensDragY := AY;
+            FLensDragMag := L.Mag;
+            FLensDragRadius := L.Radius;
+          end;
+      end;
+  end;
+end;
+
+{ Subfolders off only while MView really follows Total Commander: the
+  setting is on and Total Commander runs (user, Day 23: with it set but
+  Total Commander not in use, "the recursion does not work" with no way
+  to see why). Asked now (a cheap window lookup), so a start from Total
+  Commander, before the first poll, already counts. }
+function TMView.UseRecursive: Boolean;
+begin
+  Result := FConfig.Recursive
+    and not ((FFollowMode > 0) and (FindTotalCommanderWindow <> 0));
+end;
+
+procedure TMView.SetFollowMode(AMode: Integer);
+var
+  WasRecursive: Boolean;
+  Note: string;
+begin
+  if (AMode < 0) or (AMode > 2) then
+    AMode := 1;
+  WasRecursive := UseRecursive;
+  FFollowMode := AMode;
+  FFollowing := FindTotalCommanderWindow <> 0;   { the label's colour at once }
+  UpdateFollowBadge;
+  { Subfolders on / off with it: the image's folder again, now. }
+  if (UseRecursive <> WasRecursive) and FNavigator.HasCurrentImage and not FShowingPaste then
+    OpenMedia(FNavigator.CurrentFileName, '', True);
+  FFollowPrimed := False;      { start from what it shows now }
+  FFollowNoteShown := False;
+  FreeAndNil(FFollower);       { asks afresh (e.g. whether it knows the cursor) }
+  FConfig.FollowTotalCommander := AMode;
+  FConfig.SaveSort;
+  case AMode of
+    0: Note := 'Follow Total Commander: off';
+    1: Note := 'Follow Total Commander: its folder';
+  else
+    Note := 'Follow Total Commander: its folder and the image under its cursor';
+  end;
+  if (AMode > 0) and (FindTotalCommanderWindow = 0) then
+    Note := Note + '   (Total Commander isn''t running)';
+  ShowStatus(Note, 4000);
+end;
+
+{ Asks Total Commander what it shows (uTCFollow) and follows a change:
+  another folder is opened (the scanner checks it); in mode 2 the image
+  under its cursor is shown (from the lists when it is in the folder
+  shown, else opened with its folder). }
+procedure TMView.PollTotalCommander;
+var
+  Folder, F, OldInfo: string;
+  First, Answered: Boolean;
+begin
+  if FFollower = nil then
+    FFollower := TTCFollower.Create;
+  OldInfo := FFollower.Info;
+  Answered := FFollower.Poll(FFollowMode = 2, Folder, F);
+  { The "TC" badge while it is followed (Total Commander runs; a busy
+    moment or an archive doesn't count as gone). }
+  if (FindTotalCommanderWindow <> 0) <> FFollowing then
+  begin
+    FFollowing := not FFollowing;
+    UpdateFollowBadge;
+  end;
+  { The D line shows how Total Commander answers (testing). }
+  if FRenderer.ShowDiagnostics and (FFollower.Info <> OldInfo) then
+  begin
+    UpdateDiagnostics;
+    Refresh;
+  end;
+  if not Answered then
+    Exit;
+  if (FFollowMode = 2) and not FFollower.CursorSupported and not FFollowNoteShown then
+  begin
+    FFollowNoteShown := True;
+    ShowStatus('Total Commander doesn''t say which file its cursor is on: following its folder only',
+      8000);
+  end;
+
+  First := not FFollowPrimed;
+  FFollowPrimed := True;
+  if not SameText(Folder, FFollowFolder) then
+  begin
+    FFollowFolder := Folder;
+    FFollowFile := F;
+    if First then
+      Exit;              { what it showed when following started: noted }
+    FFollowWanted := '';
+    if (F <> '') and IsSupportedImageFile(F) then
+    begin
+      OpenMedia(F);
+      FFollowOpening := True;
+    end
+    else if not (FNavigator.HasCurrentImage and SameText(
+      IncludeTrailingPathDelimiter(FNavigator.CurrentDirectory), Folder)) then
+    begin
+      { A drive's root keeps its backslash ("C:" alone is the drive's
+        current folder). }
+      if Length(Folder) > 3 then
+        OpenMedia(ExcludeTrailingPathDelimiter(Folder))
+      else
+        OpenMedia(Folder);
+      FFollowOpening := True;
+    end;
+    Exit;
+  end;
+
+  if (FFollowMode = 2) and not SameText(F, FFollowFile) then
+  begin
+    FFollowFile := F;
+    if First or (F = '') or not IsSupportedImageFile(F)
+      or SameText(F, FNavigator.CurrentFileName) then
+      Exit;
+    { Its folder still being opened: shown when it is ready. }
+    if FFollowOpening then
+    begin
+      FFollowWanted := F;
+      Exit;
+    end;
+    FCommandMs := NowMs;
+    if FNavigator.SelectFile(F) then
+      ShowCurrent
+    else
+    begin
+      OpenMedia(F, '', True);
+      FFollowOpening := True;
+    end;
+  end;
+end;
+
+{ The info line's mark: the picture on screen is filtered. }
+function TMView.FilterMark: string;
+begin
+  { (Following Total Commander has its own badge: UpdateFollowBadge.) }
+  Result := ColourMark;
+end;
+
+{ The "TC" badge (bold, steady; user, Day 23: "[TC]" in the info line
+  was not enough, blinking too much), bottom right. }
+procedure TMView.UpdateFollowBadge;
+var
+  Style: Integer;
+begin
+  { Always there (user, Day 23): see-through when MView doesn't follow
+    Total Commander (off, or it isn't running), light blue while it
+    follows its folder, amber while it also follows its cursor. }
+  if (FFollowMode > 0) and FFollowing then
+    Style := FFollowMode
+  else
+    Style := 0;
+  FRenderer.SetBadge('TC', Style);
+  FRenderer.BadgeOn := True;
+  Refresh;
+end;
+
+{ The filters' part of the info line's mark. }
+function TMView.ColourMark: string;
+begin
+  Result := '';
+  if not ColourNeutral(FFilters) then
+    Result := 'filtered';
+  if FFilters.Mirror then
+  begin
+    if Result <> '' then
+      Result := Result + ', ';
+    Result := Result + 'mirrored';
+  end;
+  if FAutoOn then
+  begin
+    if Result <> '' then
+      Result := Result + ', ';
+    Result := Result + 'auto';
+  end;
+  if Result = '' then
+    Exit;
+  if FFiltersLocked and not FiltersNeutral(FFilters) then
+    Result := Result + ', locked';
+  Result := '     [' + Result + ']';
+  if (not ColourNeutral(FFilters)) and not FRenderer.FiltersAvailable then
+    Result := Result + ' (not shown)';
+end;
+
+{ The histogram of what is on screen, or of the edit-mode selection,
+  made again only when that changed. True if it was made again. }
+function TMView.RefreshHistogram: Boolean;
+var
+  Img: IDecodedImage;
+  Src: TBGRABitmap;
+  Sel: TImageRect;
+  R: TRect;
+  FullW, FullH: Integer;
+  FX, FY: Double;
+  ROI: Boolean;
+  Key: string;
+begin
+  Result := False;
+  { An animation: its first frame (the frames come and go). }
+  if Assigned(FAnimImage) then
+    Img := FAnimImage
+  else
+    Img := FRenderer.Image;
+  if (Img = nil) or Img.IsError or (Img.Bitmap = nil) or (Img.Bitmap.Width <= 0)
+    or (Img.Bitmap.Height <= 0) then
+  begin
+    if FHistKey <> '' then
+    begin
+      FHistKey := '';
+      FHistValid := False;
+      if Assigned(FFilterPanel) then
+        FFilterPanel.SetHistogram(FHist, False, False);
+      Result := True;
+    end;
+    Exit;
+  end;
+  Src := Img.Bitmap;
+  FullW := Img.FullWidth;
+  FullH := Img.FullHeight;
+  if (FullW <= 0) or (FullH <= 0) then
+  begin
+    FullW := Src.Width;
+    FullH := Src.Height;
+  end;
+  Sel := FRenderer.Selection;
+  ROI := FEditMode and Sel.Active and (Sel.X1 - Sel.X0 >= 1) and (Sel.Y1 - Sel.Y0 >= 1);
+  if ROI then
+  begin
+    { Original pixels -> pixels of the bitmap at hand (a quick view is
+      smaller). }
+    FX := Src.Width / FullW;
+    FY := Src.Height / FullH;
+    R := Rect(Floor(Sel.X0 * FX), Floor(Sel.Y0 * FY), Ceil(Sel.X1 * FX), Ceil(Sel.Y1 * FY));
+    { A selection just started (a few pixels): the whole image still. }
+    if (R.Right - R.Left < 4) or (R.Bottom - R.Top < 4) then
+      ROI := False;
+  end;
+  if not ROI then
+    R := Rect(0, 0, Src.Width, Src.Height);
+  Key := IntToStr(FHistGen) + '|' + Img.Key.FileName + '|'
+    + IntToStr(Src.Width) + 'x' + IntToStr(Src.Height) + '|'
+    + Format('%d,%d,%d,%d', [R.Left, R.Top, R.Right, R.Bottom]);
+  if Key = FHistKey then
+    Exit;
+  FHistKey := Key;
+  FHistValid := ImageHistogram(Src, R, FHist) > 0;
+  FHistROI := ROI;
+  if Assigned(FFilterPanel) then
+    FFilterPanel.SetHistogram(FHist, FHistValid, FHistROI);
+  Result := True;
+end;
+
+{ Auto: black and white point from the histogram (Fiji's way, 0.35 %
+  saturated), of the selection if there is one. }
+procedure TMView.ApplyAuto(AReport: Boolean);
+var
+  B, W: Double;
+  F: TFilterSettings;
+  Where: string;
+begin
+  RefreshHistogram;
+  if (not FHistValid) or not AutoLevels(FHist, B, W) then
+  begin
+    if AReport then
+      ShowStatus('auto: nothing to stretch (hardly any range in the image)', 4000);
+    { Auto for every image: not the previous image's points. }
+    if FAutoOn and ((FFilters.Black <> 0) or (FFilters.White <> 1)) then
+    begin
+      F := FFilters;
+      F.Black := 0;
+      F.White := 1;
+      SetFilters(F);
+    end;
+    Exit;
+  end;
+  F := FFilters;
+  F.Black := B;
+  F.White := W;
+  if not SameFilters(F, FFilters) then
+    SetFilters(F);
+  if AReport then
+  begin
+    if FHistROI then
+      Where := ' (from the selection)'
+    else
+      Where := '';
+    ShowStatus(Format('auto: black point %d, white point %d', [Round(B * 255), Round(W * 255)])
+      + Where, 3000);
+  end;
+end;
+
+procedure TMView.SetAutoOn(AValue: Boolean);
+begin
+  if FAutoOn = AValue then
+    Exit;
+  FAutoOn := AValue;
+  if Assigned(FFilterPanel) then
+  begin
+    FFilterPanel.AutoOn := AValue;
+    UpdateFilterPanel;
+  end;
+  if AValue then
+  begin
+    ApplyAuto(False);
+    ShowStatus('auto on: every image gets its own black / white point', 4000);
+  end
+  else
+    ShowStatus('auto off: the black / white point stays as it is', 3000);
+  UpdateInfo;
+  Refresh;
+end;
+
+{ A change made by the user (panel, command): moving the black or white
+  point by hand ends Auto for every image. }
+procedure TMView.UserFilters(const AFilters: TFilterSettings);
+begin
+  if FAutoOn and ((Abs(AFilters.Black - FFilters.Black) > 1e-9)
+    or (Abs(AFilters.White - FFilters.White) > 1e-9)) then
+    SetAutoOn(False);
+  SetFilters(AFilters);
+end;
+
+{ The best version of the current image's pixels: while an animation
+  plays, the frame on screen; a pasted or cropped image as it is; a
+  file: its best version in memory. nil if there are none. }
+function TMView.BestPixels: IDecodedImage;
+begin
+  Result := nil;
+  if Assigned(FAnimImage) and Assigned(FRenderer.Image) then
+    Result := FRenderer.Image
+  else if FShowingPaste then
+    Result := FCurrentImage
+  else if Assigned(FCurrentImage) then
+  begin
+    Result := FCache.Get(FCurrentImage.Key);
+    if (Result = nil) or Result.IsError or (Result.Quality < FCurrentImage.Quality) then
+      Result := FCurrentImage;
+  end;
+  if Assigned(Result) and (Result.IsError or (Result.Bitmap = nil)
+    or (Result.Bitmap.Width <= 0) or (Result.Bitmap.Height <= 0)) then
+    Result := nil;
+end;
+
+function TMView.CanApplyFilters: Boolean;
+begin
+  Result := (not FiltersNeutral(FFilters)) and Assigned(FCurrentImage)
+    and not FCurrentImage.IsError;
+end;
+
+{ The filters into the pixels of a copy, shown like a crop (Save / Save
+  as / the sort panel write it); the file is never changed. The copy is
+  shown unfiltered (it has them already). }
+procedure TMView.ApplyFiltersToCopy;
+var
+  Img, Copied: IDecodedImage;
+  Bmp: TBGRABitmap;
+  FullW, FullH: Integer;
+  Angle: Double;
+  Key: TImageKey;
+  Reason, SourceName, Suffix, Note: string;
+  OldCursor: TCursor;
+begin
+  if not CanApplyFilters then
+  begin
+    ShowStatus('apply filters: no filter is set', 3000);
+    Exit;
+  end;
+  Img := BestPixels;
+  if Img = nil then
+  begin
+    ShowStatus('apply filters: the image is not in memory (yet)', 4000);
+    Exit;
+  end;
+  if not DecodeFits(Img.Bitmap.Width, Img.Bitmap.Height, 0, Reason) then
+  begin
+    ShowStatus('apply filters: ' + Reason, 6000);
+    Exit;
+  end;
+  FullW := Img.FullWidth;
+  FullH := Img.FullHeight;
+  if (FullW <= 0) or (FullH <= 0) then
+  begin
+    FullW := Img.Bitmap.Width;
+    FullH := Img.Bitmap.Height;
+  end;
+
+  { A large image takes a second or so (every pixel). }
+  OldCursor := Screen.Cursor;
+  Screen.Cursor := crHourGlass;
+  try
+    Bmp := Img.Bitmap.Duplicate as TBGRABitmap;
+    ApplyFiltersToBitmap(Bmp, FFilters, True);
+  finally
+    Screen.Cursor := OldCursor;
+  end;
+
+  if FShowingPaste then
+    SourceName := FScratchPrefix
+  else
+    SourceName := ChangeFileExt(ExtractFileName(FCurrentImage.Key.FileName), '');
+  Suffix := FilterSuffix(FFilters);
+  Key.FileName := SourceName + Suffix;
+  Key.FileSize := 0;
+  Key.FileTime := Now;
+  Copied := TDecodedImage.Create(Key, qlFull, Bmp, nil, 0, 0, FullW, FullH);
+  Note := '';
+  if Img.Quality < qlFull then
+    Note := '  (from the quick view: the full image wasn''t loaded yet)';
+  Angle := FRenderer.View.Angle;
+  { The copy has the filters in its pixels: shown without them (Auto
+    ends; locked filters come back with the next file). }
+  if FAutoOn then
+  begin
+    FAutoOn := False;
+    if Assigned(FFilterPanel) then
+      FFilterPanel.AutoOn := False;
+  end;
+  ShowScratch(Copied, 'Filters applied to ' + SourceName + ' (' + Copy(Suffix, 2, MaxInt) + ')'
+    + Note, SourceName + Suffix);
+  if FFiltersLocked then
+  begin
+    FRestoreFilters := FFilters;
+    FRestorePending := True;
+  end;
+  SetFilters(NeutralFilters);
+  ShowStatus('filters applied to a copy (shown unfiltered now): Save image or the sort panel '
+    + 'writes it', 6000);
+  if Angle <> 0 then
+    FRenderer.RotateBy(Angle);
+  UpdateInfo;
+  Refresh;
+end;
+
+{ The mouse over the filter panel: True = taken. A press on it is kept
+  until the button goes up (a drag along a row may leave the panel). }
+function TMView.HandleFilterMouse(AKind: TOverlayMouseKind; AButton: TOverlayButton;
+  AX, AY, AWheel: Integer; AButtonDown, ADouble: Boolean): Boolean;
+var
+  Hit: TFilterHit;
+  F: TFilterSettings;
+  Notches: Double;
+begin
+  Result := False;
+  if FFilterPanel = nil then
+    Exit;
+  case AKind of
+    omMove:
+      begin
+        if FFilterPanel.NoteMouse(AX, AY, AButtonDown, NowMs) then
+          UpdateFilterPanel;
+        if FFilterPress then
+        begin
+          Result := True;
+          F := FFilters;
+          if FFilterPanel.Dragging and FFilterPanel.DragTo(AX, F) then
+            UserFilters(F);
+        end;
+      end;
+
+    omLeave:
+      begin
+        FFilterPanel.MouseGone(NowMs);
+        if FFilterPanel.Visible then
+          UpdateFilterPanel;
+      end;
+
+    omWheel:
+      if FFilterPanel.Contains(AX, AY) then
+      begin
+        Result := True;
+        Hit := FFilterPanel.HitTest(AX, AY);
+        if (Hit.Part = fpRow) and (AWheel <> 0) then
+        begin
+          { Wheel up (away) = more. }
+          Notches := AWheel / 120;
+          if Abs(Notches) < 1 then
+            Notches := Sign(AWheel);
+          F := FFilters;
+          StepFilter(F, Hit.Kind, Notches);
+          if not SameFilters(F, FFilters) then
+            UserFilters(F);
+        end;
+      end;
+
+    omDown:
+      if FFilterPanel.Contains(AX, AY) then
+      begin
+        Result := True;
+        FFilterPress := True;
+        if AButton <> obLeft then
+          Exit;
+        Hit := FFilterPanel.HitTest(AX, AY);
+        F := FFilters;
+        case Hit.Part of
+          fpRow:
+            if IsToggleFilter(Hit.Kind) then
+            begin
+              { Invert, Mirror: click = on / off (the second click of a
+                double-click doesn't switch it back). }
+              if not ADouble then
+              begin
+                SetFilter(F, Hit.Kind, 1 - GetFilter(F, Hit.Kind));
+                UserFilters(F);
+              end;
+            end
+            else if ADouble then
+            begin
+              { Double-click: this filter back to neutral. }
+              SetFilter(F, Hit.Kind, FilterNeutral(Hit.Kind));
+              UserFilters(F);
+            end
+            else
+              FFilterPanel.BeginDrag(Hit.Kind, AX);
+          fpReset:
+            UserFilters(NeutralFilters);
+          fpAuto:
+            { Click: once; double-click: for every image on / off. }
+            if ADouble then
+              SetAutoOn(not FAutoOn)
+            else
+              ApplyAuto(True);
+          fpLock:
+            SetFiltersLocked(not FFiltersLocked);
+          fpPin:
+            begin
+              FFilterPanel.Pinned := not FFilterPanel.Pinned;
+              FConfig.FilterPinned := FFilterPanel.Pinned;
+              FConfig.SaveFilters;
+              UpdateFilterPanel;
+            end;
+        end;
+      end;
+
+    omUp:
+      if FFilterPress then
+      begin
+        Result := True;
+        FFilterPress := False;
+        FFilterPanel.EndDrag;
+        UpdateFilterPanel;
+      end;
+  end;
 end;
 
 procedure TMView.ShowNote(const AText: string; ADurationMs: Double);

@@ -14,7 +14,10 @@ unit uGLRenderer;
   - The OpenGL textures of the image shown (FShown) and of the one
     being uploaded (FPending), each a TGLImageTextures.
   - Small textures for the text bars (info, diagnostics, mode label,
-    placeholder, zone label, gesture text).
+    placeholder, zone label, gesture text) and the two panels.
+  - The display filters' fragment shader (FShader), made at the first
+    paint with filters set or the magnifier on; it also cuts the lens
+    round and sharpens it.
   - FDeleteQueue: textures waiting to be deleted in the next paint.
 
   Knows
@@ -43,13 +46,15 @@ unit uGLRenderer;
   Threads
   -------
   UI thread only: Paint is called by the view's paint handler with the
-  context current. Further upload steps are asked for with
-  Invalidate, not with a thread.
+  context current. Further upload steps are asked for by marking the
+  window for repainting (InvalidateRect; the control's own Invalidate
+  is ignored during its paint), not with a thread; TMView's 50 ms
+  timer repaints too while IsUploading.
 
   Uses (MView units)
   ------------------
-  interface:      uDecodedImage, uRenderer, uImageSaver, uStopwatch
-  Libraries:      Classes, Types, SysUtils, Math, GL, OpenGLContext,
+  interface:      uDecodedImage, uFilters, uRenderer, uImageSaver, uStopwatch
+  Libraries:      Classes, Types, SysUtils, Math, GL, OpenGLContext, LCLIntf,
                   BGRABitmap, BGRABitmapTypes
 
   Used by
@@ -89,6 +94,10 @@ unit uGLRenderer;
   -----
   All GL calls happen in Paint, with the context current. Textures
   that are no longer needed are queued and deleted in the next paint.
+  Display filters (Phase H): a GLSL 1.10 fragment shader draws the
+  image tiles with the filters (uFilters, same maths as the CPU); the
+  textures stay unchanged, so moving a filter costs one frame. Without
+  shader functions FiltersAvailable is False.
   Needs OpenGL 2.0 or later (for mipmaps of any texture size); the
   constructor raises EGLUnsuitable otherwise, and the form falls back
   to the CPU renderer.
@@ -105,9 +114,11 @@ uses
   Math,
   GL,
   OpenGLContext,
+  LCLIntf,
   BGRABitmap,
   BGRABitmapTypes,
   uDecodedImage,
+  uFilters,
   uRenderer,
   uImageSaver,
   uStopwatch;
@@ -121,6 +132,8 @@ type
     CX0, CY0, CX1, CY1: Integer;
     { Texture coordinates of the content's corners. }
     U0, U1, VTop, VBottom: Single;
+    { The texture's size (with its border): one texel, for sharpening. }
+    TexW, TexH: Integer;
   end;
 
   { The textures of one bitmap. }
@@ -138,6 +151,46 @@ type
   { glGenerateMipmap (OpenGL 3.0 / GL_EXT_framebuffer_object), loaded
     at run time. }
   TGLGenerateMipmapProc = procedure(target: GLenum); {$IFDEF WINDOWS}stdcall;{$ELSE}cdecl;{$ENDIF}
+
+  { The OpenGL 2.0 shader functions the display filters need (Phase H),
+    loaded at run time like glGenerateMipmap. }
+  TGLCreateShaderProc = function(AType: GLenum): GLuint; {$IFDEF WINDOWS}stdcall;{$ELSE}cdecl;{$ENDIF}
+  TGLShaderSourceProc = procedure(AShader: GLuint; ACount: GLsizei; AStrings: PPAnsiChar;
+    ALengths: PGLint); {$IFDEF WINDOWS}stdcall;{$ELSE}cdecl;{$ENDIF}
+  TGLObjectProc = procedure(AObject: GLuint); {$IFDEF WINDOWS}stdcall;{$ELSE}cdecl;{$ENDIF}
+  TGLGetivProc = procedure(AObject: GLuint; AName: GLenum; AParams: PGLint); {$IFDEF WINDOWS}stdcall;{$ELSE}cdecl;{$ENDIF}
+  TGLCreateProgramProc = function: GLuint; {$IFDEF WINDOWS}stdcall;{$ELSE}cdecl;{$ENDIF}
+  TGLAttachShaderProc = procedure(AProgram, AShader: GLuint); {$IFDEF WINDOWS}stdcall;{$ELSE}cdecl;{$ENDIF}
+  TGLGetUniformLocationProc = function(AProgram: GLuint; AName: PAnsiChar): GLint; {$IFDEF WINDOWS}stdcall;{$ELSE}cdecl;{$ENDIF}
+  TGLUniform1fProc = procedure(ALocation: GLint; AValue: GLfloat); {$IFDEF WINDOWS}stdcall;{$ELSE}cdecl;{$ENDIF}
+  TGLUniform1iProc = procedure(ALocation: GLint; AValue: GLint); {$IFDEF WINDOWS}stdcall;{$ELSE}cdecl;{$ENDIF}
+
+  TGLShaderApi = record
+    CreateShader: TGLCreateShaderProc;
+    ShaderSource: TGLShaderSourceProc;
+    CompileShader: TGLObjectProc;
+    GetShaderiv: TGLGetivProc;
+    DeleteShader: TGLObjectProc;
+    CreateProgram: TGLCreateProgramProc;
+    AttachShader: TGLAttachShaderProc;
+    LinkProgram: TGLObjectProc;
+    GetProgramiv: TGLGetivProc;
+    UseProgram: TGLObjectProc;
+    DeleteProgram: TGLObjectProc;
+    GetUniformLocation: TGLGetUniformLocationProc;
+    Uniform1f: TGLUniform1fProc;
+    Uniform1i: TGLUniform1iProc;
+    Loaded: Boolean;             { all of them found }
+  end;
+
+  { The filter shader's uniforms. }
+  TGLFilterUniforms = record
+    Tex, Black, Span, Factor, Offset, Gamma, Colour, Sat, HueCos, HueSin, Invert: GLint;
+    { The magnifier: cut round at (LensX, LensY) (window pixels, from
+      the bottom), radius LensR; sharpened by Sharpen with one texel
+      (TexelX, TexelY). }
+    LensOn, LensX, LensY, LensR, Sharpen, TexelX, TexelY: GLint;
+  end;
 
   TGLTextBar = record
     Text: string;
@@ -178,6 +231,18 @@ type
     FGestureBar: TGLTextBar;     { mouse language: what the gesture does }
     FPanelBar: TGLTextBar;       { the sort panel (Phase G) }
     FPanelUploaded: Cardinal;    { PanelVersion of the texture in FPanelBar }
+    FFilterPanelBar: TGLTextBar; { the filter panel (Phase H) }
+    FFilterPanelUploaded: Cardinal;
+    FBadgeBar: TGLTextBar;       { the mode badge ("TC") }
+    FBadgeUploaded: Cardinal;
+
+    { The display filters: one small fragment shader, made at the first
+      paint that needs it. }
+    FGL2: TGLShaderApi;
+    FShader: GLuint;             { 0 = not made (or failed) }
+    FShaderTried: Boolean;
+    FShaderNote: string;         { why the filters can't be shown }
+    FUniforms: TGLFilterUniforms;
 
     function MakeTextures(const AImage: IDecodedImage; ABitmap: TBGRACustomBitmap): TGLImageTextures;
     procedure DropTextures(var ATextures: TGLImageTextures);
@@ -186,9 +251,16 @@ type
     procedure UploadSome(ATextures: TGLImageTextures; ABudgetMs: Double);
     function NextTile(ATextures: TGLImageTextures): Integer;
     procedure UpdateFocus(ATextures: TGLImageTextures; AWidth, AHeight: Integer);
-    procedure DrawTextures(ATextures: TGLImageTextures; AWidth, AHeight: Integer);
+    { ALens: the magnifier's pass (Mag times around the lens' centre, cut
+      round, sharpened). }
+    procedure DrawTextures(ATextures: TGLImageTextures; AWidth, AHeight: Integer;
+      ALens: Boolean = False);
+    procedure DrawLens(AWidth, AHeight: Integer);
     procedure UpdateBar(var ABar: TGLTextBar; const AText: string; ACentered: Boolean);
-    procedure UpdatePanel;
+    procedure UpdatePanel(ABitmap: TBGRABitmap; AVersion: Cardinal; var ABar: TGLTextBar;
+      var AUploaded: Cardinal);
+    function EnsureShader: Boolean;
+    procedure UseFilterShader(ALens: Boolean; AHeight: Integer);
     { ASolidWidth > 0: a solid black bar that wide behind the text
       (OverlaySolid) instead of the outline. }
     procedure DrawBar(const ABar: TGLTextBar; AX, AY: Integer; AOverlay: Boolean = False;
@@ -215,6 +287,7 @@ type
 
     function Description: string; override;
     function IsUploading: Boolean; override;
+    function FiltersAvailable: Boolean; override;
     property GLName: string read FGLName;
   end;
 
@@ -225,6 +298,44 @@ const
   MV_GL_BGRA = $80E1;
   MV_GL_CLAMP_TO_EDGE = $812F;
   MV_GL_GENERATE_MIPMAP = $8191;
+  MV_GL_FRAGMENT_SHADER = $8B30;
+  MV_GL_COMPILE_STATUS = $8B81;
+  MV_GL_LINK_STATUS = $8B82;
+
+  { The display filters (uFilters, same maths and order): range,
+    brightness / contrast, gamma, saturation / hue (YIQ), inversion.
+    GLSL 1.10, fragment stage only (the fixed pipeline does the rest). }
+  FilterShaderSource: AnsiString =
+    'uniform sampler2D tex;' + LineEnding +
+    'uniform float black, span, factor, offset, gamma, colour, sat, hueCos, hueSin, invert;' + LineEnding +
+    'uniform float lensOn, lensX, lensY, lensR, sharpen, texelX, texelY;' + LineEnding +
+    'void main() {' + LineEnding +
+    '  if (lensOn > 0.5) {' + LineEnding +
+    '    vec2 d = gl_FragCoord.xy - vec2(lensX, lensY);' + LineEnding +
+    '    if (dot(d, d) > lensR * lensR) discard;' + LineEnding +
+    '  }' + LineEnding +
+    '  vec2 uv = gl_TexCoord[0].st;' + LineEnding +
+    '  vec4 c = texture2D(tex, uv);' + LineEnding +
+    '  if (sharpen > 0.0) {' + LineEnding +
+    '    vec3 n = (texture2D(tex, uv + vec2(texelX, 0.0)).rgb + texture2D(tex, uv - vec2(texelX, 0.0)).rgb' + LineEnding +
+    '      + texture2D(tex, uv + vec2(0.0, texelY)).rgb + texture2D(tex, uv - vec2(0.0, texelY)).rgb) * 0.25;' + LineEnding +
+    '    c.rgb = clamp(c.rgb + sharpen * (c.rgb - n), 0.0, 1.0);' + LineEnding +
+    '  }' + LineEnding +
+    '  vec3 v = clamp((c.rgb - vec3(black)) / span, 0.0, 1.0);' + LineEnding +
+    '  v = clamp((v - 0.5) * factor + 0.5 + offset, 0.0, 1.0);' + LineEnding +
+    '  v = pow(v, vec3(gamma));' + LineEnding +
+    '  if (colour > 0.5) {' + LineEnding +
+    '    float y = dot(v, vec3(0.299, 0.587, 0.114));' + LineEnding +
+    '    float i = dot(v, vec3(0.596, -0.274, -0.322));' + LineEnding +
+    '    float q = dot(v, vec3(0.211, -0.523, 0.312));' + LineEnding +
+    '    float i2 = (i * hueCos - q * hueSin) * sat;' + LineEnding +
+    '    float q2 = (i * hueSin + q * hueCos) * sat;' + LineEnding +
+    '    v = clamp(vec3(y + 0.956 * i2 + 0.621 * q2, y - 0.272 * i2 - 0.647 * q2,' + LineEnding +
+    '      y - 1.106 * i2 + 1.703 * q2), 0.0, 1.0);' + LineEnding +
+    '  }' + LineEnding +
+    '  if (invert > 0.5) v = vec3(1.0) - v;' + LineEnding +
+    '  gl_FragColor = vec4(v, c.a);' + LineEnding +
+    '}' + LineEnding;
 
   { Per frame, while a large image is being uploaded. }
   UploadBudgetMs = 12.0;
@@ -243,6 +354,18 @@ var
 function MViewWglGetProcAddress(AName: PAnsiChar): Pointer; stdcall;
   external 'opengl32.dll' name 'wglGetProcAddress';
 {$ENDIF}
+
+{ An OpenGL function by name; nil if the driver hasn't got it. }
+function LoadGLProc(const AName: AnsiString): Pointer;
+begin
+  Result := nil;
+  {$IFDEF WINDOWS}
+  Result := MViewWglGetProcAddress(PAnsiChar(AName));
+  { Some drivers return 1, 2 or 3 instead of nil for "not there". }
+  if PtrUInt(Result) <= 3 then
+    Result := nil;
+  {$ENDIF}
+end;
 
 { Errors left over from earlier calls must not be taken for an upload
   failure. }
@@ -340,6 +463,160 @@ begin
   if PtrUInt(Pointer(FGenerateMipmap)) <= 3 then
     FGenerateMipmap := nil;
   {$ENDIF}
+
+  { The shader functions for the display filters (OpenGL 2.0). }
+  with FGL2 do
+  begin
+    Pointer(CreateShader) := LoadGLProc('glCreateShader');
+    Pointer(ShaderSource) := LoadGLProc('glShaderSource');
+    Pointer(CompileShader) := LoadGLProc('glCompileShader');
+    Pointer(GetShaderiv) := LoadGLProc('glGetShaderiv');
+    Pointer(DeleteShader) := LoadGLProc('glDeleteShader');
+    Pointer(CreateProgram) := LoadGLProc('glCreateProgram');
+    Pointer(AttachShader) := LoadGLProc('glAttachShader');
+    Pointer(LinkProgram) := LoadGLProc('glLinkProgram');
+    Pointer(GetProgramiv) := LoadGLProc('glGetProgramiv');
+    Pointer(UseProgram) := LoadGLProc('glUseProgram');
+    Pointer(DeleteProgram) := LoadGLProc('glDeleteProgram');
+    Pointer(GetUniformLocation) := LoadGLProc('glGetUniformLocation');
+    Pointer(Uniform1f) := LoadGLProc('glUniform1f');
+    Pointer(Uniform1i) := LoadGLProc('glUniform1i');
+    Loaded := Assigned(CreateShader) and Assigned(ShaderSource) and Assigned(CompileShader)
+      and Assigned(GetShaderiv) and Assigned(DeleteShader) and Assigned(CreateProgram)
+      and Assigned(AttachShader) and Assigned(LinkProgram) and Assigned(GetProgramiv)
+      and Assigned(UseProgram) and Assigned(DeleteProgram) and Assigned(GetUniformLocation) and Assigned(Uniform1f)
+      and Assigned(Uniform1i);
+  end;
+  if not FGL2.Loaded then
+    FShaderNote := 'no shaders: filters not available';
+end;
+
+function TGLRenderer.FiltersAvailable: Boolean;
+begin
+  Result := FGL2.Loaded and not (FShaderTried and (FShader = 0));
+end;
+
+{ Makes the filter shader once (context current). False if it can't be
+  had; the reason goes to the D line. }
+function TGLRenderer.EnsureShader: Boolean;
+var
+  Shader, Prog: GLuint;
+  Status: GLint;
+  Source: PAnsiChar;
+begin
+  Result := FShader <> 0;
+  if Result or FShaderTried or not FGL2.Loaded then
+    Exit;
+  FShaderTried := True;
+  ClearGLErrors;
+  Shader := FGL2.CreateShader(MV_GL_FRAGMENT_SHADER);
+  if Shader = 0 then
+  begin
+    FShaderNote := 'filter shader not made';
+    Exit;
+  end;
+  Source := PAnsiChar(FilterShaderSource);
+  FGL2.ShaderSource(Shader, 1, @Source, nil);
+  FGL2.CompileShader(Shader);
+  Status := 0;
+  FGL2.GetShaderiv(Shader, MV_GL_COMPILE_STATUS, @Status);
+  if Status = 0 then
+  begin
+    FGL2.DeleteShader(Shader);
+    FShaderNote := 'filter shader did not compile';
+    Exit;
+  end;
+  Prog := FGL2.CreateProgram();
+  if Prog = 0 then
+  begin
+    FGL2.DeleteShader(Shader);
+    FShaderNote := 'filter shader not made';
+    Exit;
+  end;
+  FGL2.AttachShader(Prog, Shader);
+  FGL2.LinkProgram(Prog);
+  { Flagged for deletion; lives on while attached to the program. }
+  FGL2.DeleteShader(Shader);
+  Status := 0;
+  FGL2.GetProgramiv(Prog, MV_GL_LINK_STATUS, @Status);
+  if Status = 0 then
+  begin
+    FGL2.DeleteProgram(Prog);
+    FShaderNote := 'filter shader did not link';
+    Exit;
+  end;
+  FShader := Prog;
+  with FUniforms do
+  begin
+    Tex := FGL2.GetUniformLocation(Prog, 'tex');
+    Black := FGL2.GetUniformLocation(Prog, 'black');
+    Span := FGL2.GetUniformLocation(Prog, 'span');
+    Factor := FGL2.GetUniformLocation(Prog, 'factor');
+    Offset := FGL2.GetUniformLocation(Prog, 'offset');
+    Gamma := FGL2.GetUniformLocation(Prog, 'gamma');
+    Colour := FGL2.GetUniformLocation(Prog, 'colour');
+    Sat := FGL2.GetUniformLocation(Prog, 'sat');
+    HueCos := FGL2.GetUniformLocation(Prog, 'hueCos');
+    HueSin := FGL2.GetUniformLocation(Prog, 'hueSin');
+    Invert := FGL2.GetUniformLocation(Prog, 'invert');
+    LensOn := FGL2.GetUniformLocation(Prog, 'lensOn');
+    LensX := FGL2.GetUniformLocation(Prog, 'lensX');
+    LensY := FGL2.GetUniformLocation(Prog, 'lensY');
+    LensR := FGL2.GetUniformLocation(Prog, 'lensR');
+    Sharpen := FGL2.GetUniformLocation(Prog, 'sharpen');
+    TexelX := FGL2.GetUniformLocation(Prog, 'texelX');
+    TexelY := FGL2.GetUniformLocation(Prog, 'texelY');
+  end;
+  FShaderNote := '';
+  Result := True;
+end;
+
+{ Switches the filter shader on with the current settings. }
+procedure TGLRenderer.UseFilterShader(ALens: Boolean; AHeight: Integer);
+var
+  F: TFilterSettings;
+  ColourOn, InvertOn: Single;
+begin
+  F := Filters;
+  FGL2.UseProgram(FShader);
+  if F.Invert then
+    InvertOn := 1
+  else
+    InvertOn := 0;
+  if NeedsColourStep(F) and ((Abs(F.Saturation - 1) > 1e-6) or (Abs(F.Hue) > 1e-6)) then
+    ColourOn := 1
+  else
+    ColourOn := 0;
+  with FUniforms do
+  begin
+    FGL2.Uniform1i(Tex, 0);
+    FGL2.Uniform1f(Black, F.Black);
+    FGL2.Uniform1f(Span, Max(F.White - F.Black, 1e-5));
+    FGL2.Uniform1f(Factor, ContrastFactor(F.Contrast));
+    FGL2.Uniform1f(Offset, BrightnessOffset(F.Brightness));
+    FGL2.Uniform1f(Gamma, F.Gamma);
+    FGL2.Uniform1f(Colour, ColourOn);
+    FGL2.Uniform1f(Sat, F.Saturation);
+    FGL2.Uniform1f(HueCos, Cos(DegToRad(F.Hue)));
+    FGL2.Uniform1f(HueSin, Sin(DegToRad(F.Hue)));
+    FGL2.Uniform1f(Invert, InvertOn);
+    if ALens then
+    begin
+      FGL2.Uniform1f(LensOn, 1);
+      { gl_FragCoord: window pixels from the bottom left, centres at .5. }
+      FGL2.Uniform1f(LensX, Lens.X);
+      FGL2.Uniform1f(LensY, AHeight - Lens.Y);
+      FGL2.Uniform1f(LensR, Lens.Radius);
+      FGL2.Uniform1f(Sharpen, LensSharpenAmount(Lens.Sharpen));
+    end
+    else
+    begin
+      FGL2.Uniform1f(LensOn, 0);
+      FGL2.Uniform1f(Sharpen, 0);
+    end;
+    FGL2.Uniform1f(TexelX, 0);
+    FGL2.Uniform1f(TexelY, 0);
+  end;
 end;
 
 destructor TGLRenderer.Destroy;
@@ -372,6 +649,8 @@ begin
     Result := Result + '   (old mipmaps)';
   if FGpuNote <> '' then
     Result := Result + '   (' + FGpuNote + ')';
+  if (FShaderNote <> '') and not ColourNeutral(Filters) then
+    Result := Result + '   (' + FShaderNote + ')';
 end;
 
 { Plans the tiles; nothing is uploaded yet. }
@@ -490,6 +769,13 @@ begin
   FreeAndNil(FShown);
   ForgetBar(FPanelBar);
   FPanelUploaded := 0;
+  ForgetBar(FFilterPanelBar);
+  ForgetBar(FBadgeBar);
+  FBadgeUploaded := 0;
+  FFilterPanelUploaded := 0;
+  { The shader went with the context: made again when needed. }
+  FShader := 0;
+  FShaderTried := False;
   ForgetBar(FInfoBar);
   ForgetBar(FDiagBar);
   ForgetBar(FModeBar);
@@ -592,6 +878,8 @@ begin
       Exit;
     end;
     Texture := Tex;
+    TexW := TW;
+    TexH := TH;
 
     { Texture coordinates of the content edges. The first row uploaded
       is t = 0: the tile's bottom row if bottom-up, else its top row. }
@@ -670,13 +958,25 @@ begin
     Exit;
   SX := Scale * LogW / BmpW;
   SY := Scale * LogH / BmpH;
-  { Window centre relative to the image centre on screen, turned back. }
-  VX := -FView.PanX;
-  VY := -FView.PanY;
+  { Window centre (the magnifier's, while it is on) relative to the
+    image centre on screen, turned back. }
+  if Lens.Active then
+  begin
+    VX := Lens.X - (AWidth / 2 + FView.PanX);
+    VY := Lens.Y - (AHeight / 2 + FView.PanY);
+  end
+  else
+  begin
+    VX := -FView.PanX;
+    VY := -FView.PanY;
+  end;
   Rad := DegToRad(-FView.Angle);
   C := Cos(Rad);
   S := Sin(Rad);
-  FFocusX := BmpW / 2 + (VX * C - VY * S) / SX;
+  if Filters.Mirror then
+    FFocusX := BmpW / 2 - (VX * C - VY * S) / SX
+  else
+    FFocusX := BmpW / 2 + (VX * C - VY * S) / SX;
   FFocusY := BmpH / 2 + (VX * S + VY * C) / SY;
 end;
 
@@ -690,11 +990,13 @@ begin
   glLoadIdentity;
 end;
 
-procedure TGLRenderer.DrawTextures(ATextures: TGLImageTextures; AWidth, AHeight: Integer);
+procedure TGLRenderer.DrawTextures(ATextures: TGLImageTextures; AWidth, AHeight: Integer;
+  ALens: Boolean);
 var
   LogW, LogH, BmpW, BmpH, I: Integer;
-  Scale, SX, SY, CX, CY: Double;
+  Scale, SX, SY, CX, CY, Mag: Double;
   MagFilter: GLint;
+  Filtered: Boolean;
 begin
   BmpW := ATextures.Bitmap.Width;
   BmpH := ATextures.Bitmap.Height;
@@ -720,24 +1022,49 @@ begin
     CY := Round(CY - BmpH / 2) + BmpH / 2;
   end;
 
-  if SX >= NearestFromScale then
+  Mag := 1;
+  if ALens then
+    Mag := Lens.Mag;
+  if SX * Mag >= NearestFromScale then
     MagFilter := GL_NEAREST
   else
     MagFilter := GL_LINEAR;
 
   SetupScreenProjection(AWidth, AHeight);
+  { The magnifier: everything Mag times larger around its centre. }
+  if ALens then
+  begin
+    glTranslatef(Lens.X, Lens.Y, 0);
+    glScalef(Mag, Mag, 1);
+    glTranslatef(-Lens.X, -Lens.Y, 0);
+  end;
   glTranslatef(CX, CY, 0);
   glRotatef(FView.Angle, 0, 0, 1);
-  glScalef(SX, SY, 1);
+  { Mirrored (filters, Mirror): x runs the other way, before the turn. }
+  if Filters.Mirror then
+    glScalef(-SX, SY, 1)
+  else
+    glScalef(SX, SY, 1);
   glTranslatef(-BmpW / 2, -BmpH / 2, 0);
 
   glEnable(GL_TEXTURE_2D);
   glColor4f(1, 1, 1, 1);
+  { The display filters, in the shader (the image textures stay as
+    they are: changing a filter costs nothing but this frame). }
+  { The lens always (cut round, sharpened) if the shader is there. }
+  Filtered := (ALens or not ColourNeutral(Filters)) and EnsureShader;
+  if Filtered then
+    UseFilterShader(ALens, AHeight);
   for I := 0 to High(ATextures.Tiles) do
     with ATextures.Tiles[I] do
     begin
       if Texture = 0 then
         Continue;
+      if Filtered and ALens and (TexW > 0) and (TexH > 0) then
+      begin
+        FGL2.Uniform1f(FUniforms.TexelX, 1 / TexW);
+        FGL2.Uniform1f(FUniforms.TexelY, 1 / TexH);
+      end;
       glBindTexture(GL_TEXTURE_2D, Texture);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, MagFilter);
       glBegin(GL_QUADS);
@@ -747,7 +1074,99 @@ begin
       glTexCoord2f(U0, VBottom); glVertex2f(CX0, CY1);
       glEnd;
     end;
+  if Filtered then
+    FGL2.UseProgram(0);
   glDisable(GL_TEXTURE_2D);
+end;
+
+{ The magnifier: a black disc, the image again Mag times larger cut
+  round (the shader; without it a square, with the scissor), and a
+  rim, dark under light (amber when locked). }
+procedure TGLRenderer.DrawLens(AWidth, AHeight: Integer);
+const
+  Segments = 96;
+var
+  I, Pass: Integer;
+  A, R: Double;
+  Round_: Boolean;
+begin
+  R := Lens.Radius;
+  if R < 4 then
+    Exit;
+  Round_ := EnsureShader;
+  SetupScreenProjection(AWidth, AHeight);
+  glDisable(GL_TEXTURE_2D);
+  glColor4f(0, 0, 0, 1);
+  if Round_ then
+  begin
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(Lens.X, Lens.Y);
+    for I := 0 to Segments do
+    begin
+      A := 2 * Pi * I / Segments;
+      glVertex2f(Lens.X + R * Cos(A), Lens.Y + R * Sin(A));
+    end;
+    glEnd;
+  end
+  else
+  begin
+    glBegin(GL_QUADS);
+    glVertex2f(Lens.X - R, Lens.Y - R);
+    glVertex2f(Lens.X + R, Lens.Y - R);
+    glVertex2f(Lens.X + R, Lens.Y + R);
+    glVertex2f(Lens.X - R, Lens.Y + R);
+    glEnd;
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(Round(Lens.X - R), Round(AHeight - Lens.Y - R), Round(2 * R), Round(2 * R));
+  end;
+  glColor4f(1, 1, 1, 1);
+
+  DrawTextures(FShown, AWidth, AHeight, True);
+  if FPending <> nil then
+    DrawTextures(FPending, AWidth, AHeight, True);
+  if not Round_ then
+    glDisable(GL_SCISSOR_TEST);
+
+  { The rim. }
+  SetupScreenProjection(AWidth, AHeight);
+  glDisable(GL_TEXTURE_2D);
+  for Pass := 0 to 1 do
+  begin
+    if Pass = 0 then
+    begin
+      glLineWidth(3);
+      glColor4f(0, 0, 0, 1);
+    end
+    else
+    begin
+      glLineWidth(1);
+      if Lens.Locked then
+        glColor4f(1, 0.75, 0.25, 1)
+      else
+        glColor4f(1, 1, 1, 1);
+    end;
+    if Round_ then
+    begin
+      glBegin(GL_LINE_LOOP);
+      for I := 0 to Segments - 1 do
+      begin
+        A := 2 * Pi * I / Segments;
+        glVertex2f(Lens.X + R * Cos(A), Lens.Y + R * Sin(A));
+      end;
+      glEnd;
+    end
+    else
+    begin
+      glBegin(GL_LINE_LOOP);
+      glVertex2f(Lens.X - R, Lens.Y - R);
+      glVertex2f(Lens.X + R, Lens.Y - R);
+      glVertex2f(Lens.X + R, Lens.Y + R);
+      glVertex2f(Lens.X - R, Lens.Y + R);
+      glEnd;
+    end;
+  end;
+  glLineWidth(1);
+  glColor4f(1, 1, 1, 1);
 end;
 
 { Redraws a bar's bitmap and texture if its text changed. }
@@ -854,24 +1273,25 @@ begin
   end;
 end;
 
-{ The sort panel's picture as a texture, uploaded again only when it
-  changed (PanelVersion). Drawn 1:1, no mipmaps. }
-procedure TGLRenderer.UpdatePanel;
+{ A panel's picture (sort panel, filter panel) as a texture, uploaded
+  again only when it changed (AVersion). Drawn 1:1, no mipmaps. }
+procedure TGLRenderer.UpdatePanel(ABitmap: TBGRABitmap; AVersion: Cardinal;
+  var ABar: TGLTextBar; var AUploaded: Cardinal);
 var
   Bmp: TBGRABitmap;
   W, H: Integer;
   Base: PBGRAPixel;
   Format: GLenum;
 begin
-  Bmp := Panel;
+  Bmp := ABitmap;
   if (Bmp = nil) or (Bmp.Width <= 0) or (Bmp.Height <= 0) then
     Exit;
-  if (FPanelBar.Texture <> 0) and (FPanelUploaded = PanelVersion) then
+  if (ABar.Texture <> 0) and (AUploaded = AVersion) then
     Exit;
-  if FPanelBar.Texture <> 0 then
+  if ABar.Texture <> 0 then
   begin
-    glDeleteTextures(1, @FPanelBar.Texture);
-    FPanelBar.Texture := 0;
+    glDeleteTextures(1, @ABar.Texture);
+    ABar.Texture := 0;
   end;
   W := Bmp.Width;
   H := Bmp.Height;
@@ -883,8 +1303,8 @@ begin
     Format := MV_GL_BGRA
   else
     Format := GL_RGBA;
-  glGenTextures(1, @FPanelBar.Texture);
-  glBindTexture(GL_TEXTURE_2D, FPanelBar.Texture);
+  glGenTextures(1, @ABar.Texture);
+  glBindTexture(GL_TEXTURE_2D, ABar.Texture);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, MV_GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, MV_GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -894,16 +1314,16 @@ begin
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, Format, GL_UNSIGNED_BYTE, Base);
   if glGetError() <> GL_NO_ERROR then
   begin
-    glDeleteTextures(1, @FPanelBar.Texture);
-    FPanelBar.Texture := 0;
+    glDeleteTextures(1, @ABar.Texture);
+    ABar.Texture := 0;
     Exit;
   end;
   if PtrUInt(Bmp.ScanLine[0]) > PtrUInt(Bmp.ScanLine[H - 1]) then
-    FPanelBar.Height := -H
+    ABar.Height := -H
   else
-    FPanelBar.Height := H;
-  FPanelBar.Width := W;
-  FPanelUploaded := PanelVersion;
+    ABar.Height := H;
+  ABar.Width := W;
+  AUploaded := AVersion;
 end;
 
 { AX, AY: top-left corner on screen. The screen projection is set.
@@ -1060,6 +1480,9 @@ begin
     if FPending <> nil then
       DrawTextures(FPending, AWidth, AHeight);
   end;
+  { The magnifier, over the image (the frame below stays on top). }
+  if Lens.Active and (FShown <> nil) and (FImage <> nil) and not FImage.IsError then
+    DrawLens(AWidth, AHeight);
 
   { Edit mode: the selection as a frame, dark under light so it shows
     on any image. }
@@ -1102,7 +1525,15 @@ begin
   if FInfoBar.Texture <> 0 then
   begin
     Dec(Bottom, Abs(FInfoBar.Height));
+    { It ends before the mode badge (bottom right): cut there. }
+    if BadgeRoom > 0 then
+    begin
+      glEnable(GL_SCISSOR_TEST);
+      glScissor(0, 0, Max(0, AWidth - BadgeRoom), AHeight);
+    end;
     DrawBar(FInfoBar, 0, Bottom, True, SolidWidth);
+    if BadgeRoom > 0 then
+      glDisable(GL_SCISSOR_TEST);
   end;
   UpdateBar(FDiagBar, DiagnosticsLine, False);
   if FDiagBar.Texture <> 0 then
@@ -1130,15 +1561,39 @@ begin
     DrawBar(FGestureBar, (AWidth - FGestureBar.Width) div 2,
       (AHeight - Abs(FGestureBar.Height)) div 2, True);
 
+  { The mode badge, bottom right (blinking: drawn while BadgeOn). }
+  if BadgeOn and (BadgeBitmap <> nil) then
+  begin
+    UpdatePanel(BadgeBitmap, BadgeVersion, FBadgeBar, FBadgeUploaded);
+    if FBadgeBar.Texture <> 0 then
+    begin
+      glEnable(GL_BLEND);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      DrawBar(FBadgeBar, AWidth - FBadgeBar.Width - 8, AHeight - Abs(FBadgeBar.Height) - 6);
+      glDisable(GL_BLEND);
+    end;
+  end;
   { The sort panel, on top, with its transparency. }
   if Assigned(Panel) then
   begin
-    UpdatePanel;
+    UpdatePanel(Panel, PanelVersion, FPanelBar, FPanelUploaded);
     if FPanelBar.Texture <> 0 then
     begin
       glEnable(GL_BLEND);
       glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
       DrawBar(FPanelBar, PanelX, PanelY);
+      glDisable(GL_BLEND);
+    end;
+  end;
+  { The filter panel, at the left edge, the same way. }
+  if Assigned(FilterPanel) then
+  begin
+    UpdatePanel(FilterPanel, FilterPanelVersion, FFilterPanelBar, FFilterPanelUploaded);
+    if FFilterPanelBar.Texture <> 0 then
+    begin
+      glEnable(GL_BLEND);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      DrawBar(FFilterPanelBar, FilterPanelX, FilterPanelY);
       glDisable(GL_BLEND);
     end;
   end;
@@ -1152,9 +1607,14 @@ begin
   if NewImagePainted then
     ReportPainted;
 
-  { Continue the upload in the next frame. }
-  if MoreToUpload then
-    FControl.Invalidate;
+  { Continue the upload in the next frame. Not FControl.Invalidate:
+    TOpenGLControl ignores that while it paints (csCustomPaint), so the
+    upload stopped halfway until something else asked for a paint
+    (Day 22: a photo stayed half blocky, "sharpening 3 / 12"). The
+    window itself is marked instead; TMView.PumpDeliveries is the
+    safety net. }
+  if MoreToUpload and FControl.HandleAllocated then
+    InvalidateRect(FControl.Handle, nil, False);
 end;
 
 { Reads the frame just drawn (back buffer) and saves it as PNG. GL rows

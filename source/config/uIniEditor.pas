@@ -26,7 +26,8 @@ unit uIniEditor;
   - The ini file name given to LoadFile, and the mouse profile file
     name given to LoadMouseProfile (the main form passes both).
   - ConfigKeyHelp (uConfig): the help text for a key.
-  - OnViewImages and OnExitRequest: the main form's handlers.
+  - OnViewImages, OnExitRequest and OnSideBySide: the main form's
+    handlers.
   - Application.HintHidePause: set to 15 s at creation, for the
     longer balloon texts.
 
@@ -110,12 +111,14 @@ type
     FHintLine: Integer;          { line the hint was made for, -1 = none }
     FOnViewImages: TNotifyEvent;
     FOnExitRequest: TNotifyEvent;
+    FOnSideBySide: TNotifyEvent;
 
     function MakeButton(const ACaption: string; AHandler: TNotifyEvent): TButton;
     procedure HandleViewClick(Sender: TObject);
     procedure HandleSaveClick(Sender: TObject);
     procedure HandleUndoClick(Sender: TObject);
     procedure HandleExitClick(Sender: TObject);
+    procedure HandleSideBySideClick(Sender: TObject);
     procedure HandleEditStatus(Sender: TObject; Changes: TSynStatusChanges);
     procedure HandleEditKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure HandleEditMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
@@ -123,7 +126,6 @@ type
     { Help text for a line (0-based), '' for blank lines and comments. }
     function HelpForLine(ALine: Integer): string;
     procedure UpdateHelp;
-    procedure ShowNote(const AText: string);
     procedure HandleMouseChange(Sender: TObject);
     procedure HandleZonesToggle(Sender: TObject);
     { A value in the ini text being edited (not the file). }
@@ -144,11 +146,16 @@ type
     { Esc on the settings screen (the main form sees it first): like
       Exit, so with unsaved changes only the second press ends MView. }
     procedure RequestExit;
+    { A note in the help line (also the main form's, e.g. side by side). }
+    procedure ShowNote(const AText: string);
 
     { "View images" / F5, after saving. }
     property OnViewImages: TNotifyEvent read FOnViewImages write FOnViewImages;
     { "Exit" (unsaved changes: only on the second press). }
     property OnExitRequest: TNotifyEvent read FOnExitRequest write FOnExitRequest;
+    { "Total Commander side by side" (user, Day 22): the main form places
+      the windows (the last session's folder, else Documents). }
+    property OnSideBySide: TNotifyEvent read FOnSideBySide write FOnSideBySide;
   end;
 
 implementation
@@ -179,6 +186,7 @@ begin
   MakeButton('View images (F5)', @HandleViewClick);
   MakeButton('Save (Ctrl+S)', @HandleSaveClick);
   MakeButton('Undo changes', @HandleUndoClick);
+  MakeButton('Total Commander side by side', @HandleSideBySideClick);
   MakeButton('Exit', @HandleExitClick);
 
   FHelp := TLabel.Create(Self);
@@ -408,6 +416,13 @@ begin
     Exit;
   if Assigned(FOnViewImages) then
     FOnViewImages(Self);
+end;
+
+procedure TIniEditor.HandleSideBySideClick(Sender: TObject);
+begin
+  if Assigned(FOnSideBySide) then
+    FOnSideBySide(Self);
+  FocusEditor;
 end;
 
 procedure TIniEditor.HandleSaveClick(Sender: TObject);

@@ -23,6 +23,8 @@ Sections marked **[Decision]** are settled. Sections marked **[Open]** still nee
 - §17, §18: phase table and decisions updated.
 - §1.1, §2.0 (Day 19, night): the homage to Hamana and the first principle; the Hamana mouse profile; the architecture pictures in `docs\architecture\`.
 - §9.6, §9.7, §14, §15 (Day 21): sorting into folders (Phase G, G1, first stage): the sort panel, copy / move / delete on a worker thread, Undo, `[Sort]` keys, `TestSort`. The plan for all of Phase G is `docs\Strategy_Phase_G.md`.
+- §9.9, §14 (Day 23): the magnifier (Phase H, G6).
+- §9.8, §14, §15 (Day 22): display filters, steps 1 and 2 (Phase H, "Looking closer" — proposed name for filters and magnifier, planned as G4 / G6): the filter panel at the left edge, the GPU shader and CPU path, Lock filters, `[Filters] Pinned`, `TestFilters`.
 
 ---
 
@@ -710,7 +712,7 @@ Space = NextImage
 | Group | Commands |
 |---|---|
 | Navigation | `NextImage`, `PreviousImage`, `NextFolder`, `PreviousFolder`, `ParentFolder`, `Rescan` |
-| View | `ZoomIn`, `ZoomOut` (at the mouse), `Fit`, `OriginalSize`, `FitOr100` (at the mouse), `RotateLeft`, `RotateRight` (90°), `TurnLeft`, `TurnRight` (5° per wheel notch) |
+| View | `ZoomIn`, `ZoomOut` (at the mouse), `Fit`, `OriginalSize` and `FitOr100` (100 % centred in the window, Day 23), `RotateLeft`, `RotateRight` (90°), `TurnLeft`, `TurnRight` (5° per wheel notch) |
 | Order | `SortByDate`, `SortByName`, `ToggleSort` |
 | Modes | `ZoomMode`, `RotateMode` (switches), `EditMode`, `EditModeOn`, `EditModeOff` |
 | Window | `Fullscreen`, `Info`, `Diagnostics`, `Menu` |
@@ -757,6 +759,8 @@ An existing `Default.mouse` keeps its entries. The "Mouse & keys" page has a but
 - **Back (Esc):** leaves the zoom / rotate mode first, then edit mode; with no mode on it returns to the settings screen (§9.3). The engine sends Back to `TMView`, which knows about edit mode.
 - **Cursor hiding:** after `[Mouse] MouseCursorHideTime` ms without input (default 3000; 0 = never). Not while the menu is open.
 - The **menu** is a command (right click by default), no longer the LCL's automatic context menu.
+
+*(Day 22, user)* **Where the wheel zooms:** with the zones on, a zone's (or [Anywhere]'s) `ZoomIn` / `ZoomOut` zooms at the **middle of the view**: the mouse sits in a corner zone, and zooming at the mouse pulled the image towards that corner. With the zones off (`ZonesEnabled=0`) it zooms at the mouse, as before; zoom mode (X1) always zooms at the mouse.
 
 ### 9.3 Keyboard
 
@@ -837,11 +841,52 @@ The decisions are in `docs\Strategy_Phase_G.md` (v5). Built in the first stage:
 - **Make icon from this image** (menu): the edit-mode selection, else the middle of the screen, as a square (the shorter side); scaled to 16, 24, 32, 48, 64, 128 and 256 px, PNG pictures with alpha in one .ico, named after the current image's folder (`IconBaseName`), written by the mover thread into the icon folder; an existing one is renamed `<name>_previous.ico` (then `_previous_1` …), never overwritten. The buttons that find it by name flash once it is written.
 - **Into a slot's folder** *(user: "no way to switch into the side panel folders")*: a swipe to the right over its button (at least 40 px, more sideways than up / down), a wheel click on it, or "Open this folder" in its "…" menu: the folder is opened for browsing (like a drop).
 - **A pasted or cropped image** *(user)*: copying / moving it with the panel saves it as PNG into that folder (`<name>_<time>.png`, `_1` if taken; the folder must exist). Left click: it stays on screen; right click: the file shown before comes back at once (if the save then fails, the image comes back). Undo moves the saved file into the deleted-files folder. "Delete current image" on a pasted image just closes it.
+- **Follow Total Commander** *(Day 23, user: "a power viewer for tc")* (`[Sort] FollowTotalCommander`: 0 off, 1 its folder (default), 2 also the image under its cursor; right-click menu "Follow Total Commander"). Total Commander tells nobody about changes, so MView asks every 200 ms (`uTCFollow`): `WM_COPYDATA` 'GW' "SP" / "SC", answered to a hidden message window (codes from community scripts), with the documented `WM_USER+50` path line as the fallback for the folder. Only changes in Total Commander are followed (MView's own browsing is never pulled back); archives / FTP / plugin paths are ignored; while a folder opens, the last cursor position is shown when it is ready. If the cursor question isn't answered, MView says so once and follows the folder. While following (either mode) **and Total Commander runs**, folders are opened without their subfolders, whatever `[Navigation] Recursive` says (user); switching the mode reopens the image's folder accordingly. With Total Commander not running, browsing is as the ini says. A **bold "TC" label** in the bottom right corner, always there (user): see-through (an outline) when MView doesn't follow, **light blue** while it follows the folder, **amber** while it also follows the cursor (steady; blinking was tried and was too much); the info line ends before it; **a left click on it cycles** off → its folder → folder and cursor (saved, the info line names the setting) shows that MView follows it now (user: otherwise there was no way to see why subfolders were missing; a plain `[TC]` in the info line was not enough); it shows also with the info line off. The cursor question is "SN" ("SC" answers a number, user's test); without an answer, the active file list's line under the cursor is read (`WM_USER+50` 3 / 1007 / 1008, `LB_GETTEXT`). The D line shows how Total Commander answered.
+- **Edit mode with zoom / rotate mode** *(Day 23, user)*: the top line says `EDIT ON | ZOOM …` / `EDIT ON | ROTATE …`, since edit mode stays on in both.
+- **Settings screen, Total Commander side by side** *(Day 22, user)*: a button next to Exit puts MView into the left half of its screen and Total Commander into the right, in the last session's folder (`[Startup] LastDirectory`), else Documents. Not a toggle.
 - **Settings screen** *(user)*: Ctrl+V with an image (and no text) in the clipboard opens the viewer with that image (the last session opens behind it, for the next step); files dropped anywhere on the settings screen, also on the text, open as before.
 
 - **Side by side with Total Commander** *(Day 21, user)*: menu entry (ticked while on) and mouse profile command `SideBySide`. MView fills the left half of its screen's work area (the taskbar stays free), Total Commander the right half, so the sort panel sits right next to it. Total Commander opens the image's folder in its active panel (`TOTALCMD64.EXE /O /S /L=<folder>`; a running one gets it passed, otherwise it is started). The program: `[Sort] TotalCommander` (the program or its folder), else the running one's, else its registry entry (`InstallDir`), else `C:\totalcmd` and the Program Files folders. Windows 10 / 11's invisible window borders are corrected so the halves meet. A Total Commander just started is placed when its window appears (up to 60 s: an unregistered copy shows its reminder first); a running one is placed at once and again after 0.6 s (it may bring itself up when it gets the folder). Again (or fullscreen, or Esc to the settings screen): MView goes back to fullscreen / its place before; Total Commander stays. The window place saved in MView.ini is the place before, never the half. Limit (accepted): a Total Commander running as administrator can't be moved by MView ("does it run as administrator?"). Unit `uTotalCommander`.
 
 Next stages (Strategy_Phase_G.md): G6 magnifier, G4 filters; a settings page for the sort folders.
+
+### 9.8 Display filters *(Day 22, Phase H "Looking closer", step 1)* [Decision]
+
+The plan is `docs\Strategy_Phase_G.md`, G4. Built in step 1:
+
+- **The filters** (`uFilters`, one definition of the maths for both renderers), in this fixed order: black / white point (dynamic range) → brightness / contrast → gamma → saturation / hue → invert. Black / white point 0 … 255 (on 8-bit values; white stays above black), brightness and contrast −100 … +100 % (contrast +100 % is a 20 × stretch, −100 % flat grey), gamma 0.2 … 5 (< 1 brightens the dark parts), saturation 0 … 3 (0 = grey at the pixel's luma), hue −180 … +180° (turned in YIQ, so the brightness stays), invert on / off. **Display only:** the image, the file, Save and sorting are never affected.
+- **GPU:** MView's first shader, a GLSL 1.10 fragment shader, draws the image tiles with the filters; the textures stay as they are, so moving a filter costs one frame, at any image size. The OpenGL 2.0 shader functions are loaded at run time; without them (or if the shader doesn't compile) the filters can't be shown: the panel says so, the info line says `[filtered] (not shown)`, the D line gives the reason, and `[Renderer] UseGPU=0` shows them on the CPU.
+- **CPU:** the same maths on the screen-sized part it draws (a copy, made again when the view or a filter changes): black / white / brightness / contrast / gamma as one 256-entry table, saturation / hue per pixel with the trigonometry worked out once.
+- **The filter panel** (`uFilterPanel`) at the **left edge**, drawn like the sort panel (translucent, on top, a second panel slot in both renderers): it opens when the mouse rests at the left edge (`[Sort] EdgeDelayMs` / `EdgeWidth`, the same as the sort panel), with the menu's "Filters (side menu, left)" or the `FilterPanel` command; closes as the sort panel (unpinned, 0.6 s after the mouse left; Esc closes it, after an open sort panel). **Pin:** `[Filters] Pinned`. One row per filter: name, value, a bar with a mark at neutral, the part away from neutral lit. **Wheel over a row** = one step (up = more; it snaps to neutral when passing it); **left drag along a row** = relative (a click alone changes nothing), snaps at neutral; **double-click** = that filter back to neutral; Invert: click = on / off. **Reset all** below; the hint line at the bottom says what the part under the mouse does.
+- **Lock filters** *(user)*: a toggle in the right-click menu (ticked when on), the lock in the panel's header, and the `LockFilters` command. Unlocked (the default), a new file is shown unfiltered; the quick view, screen copy and full image of one file count as one. Locked, the filters stay for every image. A crop keeps them (the same image, closer).
+- **The mark:** `[filtered]` (or `[filtered, locked]`) in the info line whenever a filter is set, so a filtered view is never taken for the data.
+- Mouse profile commands: `FilterPanel`, `LockFilters`, `ResetFilters` (none bound by default).
+
+**Step 2 (Day 22):**
+
+- **Histogram** under the panel's header: the luma of the image on screen (an animation: its first frame), or of the edit-mode selection (marked "selection"), sampled to about a million pixels (`uFilterImage`); square-root scale, pure black and white not counted for the height; the black / white points marked, the parts outside shaded. Made again only when the image, its quality or the selection changes.
+- **Auto** (button next to Reset all; commands `AutoLevels`, `AutoLevelsMode`): black / white point like Fiji's auto contrast, 0.35 % of the pixels saturated, half at each end (`AutoLevels`); from the selection if there is one (at least 4 × 4 pixels). **Click = once. Double-click = for every image** *(user)*: the button stays lit, `[auto]` in the info line, each image (and its better version when it arrives) gets its own points, and a selection re-levels live. Moving the black or white point by hand (or Reset all) ends it; the other filters don't. An image with hardly any range is left at 0 / 255. With Lock filters and Auto both on, Auto sets the points and the lock keeps the rest.
+- **Apply filters to a copy** (menu, enabled while a filter is set; command `ApplyFilters`): the filters go into the pixels of a copy of the best version in memory, shown like a crop (unfiltered now, as it has them) and named after them (`<name>_bp12_wp240_g0.80_inv`); Save / Save as / the sort panel write it. The file is never changed. Locked filters come back with the next file; Auto ends.
+
+**After testing (Day 22, evening, user):**
+
+- **Pin and lock** sit at the left of the panel's header, next to the window's edge, the lock right of the pin; then the title.
+- **Mirror left / right** *(user: "left and right are juxtaposed")*: a toggle row after Invert. Geometry, not colour: the renderers mirror the view (GPU: a negative x scale; CPU: a mirrored copy, then the quarter turns), and screen ↔ image coordinates follow, so selections, crops and the histogram's ROI stay right. It travels with the filters (Lock, Reset, the info line's `[mirrored]`, `_mirror` in "Apply filters to a copy", which mirrors the pixels).
+- **Auto for every image from the start:** `[Filters] AutoFilter=1` (default 1, user: "it could be a default setting"); double-click Auto still switches it for the session.
+- **The size on screen** in the info line next to the percentage: `52 % = 1997 x 1331` (the image's size times the scale, not turned).
+- **Resize to the size shown (W x H)** (menu, command `ResizeToShown`) *(user: copy / move / save always used the original size)*: a copy of the whole image at the size it has on screen, smooth resampling both ways, shown like a crop (the filters stay on the display); Save / Save as / the sort panel write it. Named `<name>_<W>x<H>`.
+
+Next: the magnifier (G6), §9.9.
+
+### 9.9 Magnifier *(Day 23, Phase H "Looking closer", G6)* [Decision]
+
+As decided with the user (Day 21, 23), after Hamana's lens:
+
+- **On / off:** right-click menu "Magnifier (lens)" (ticked while on), command `Magnifier`; Esc turns it off (after open panels). It starts where the mouse is.
+- **The lens:** round, follows the mouse (cross cursor), shows what is under it **Mag times larger than the screen shows it** (user: relative to the screen), from the full image (loaded at once while the lens is on, no refine pause). Mode line: `LENS 3.0 x = 450 % 300 px sharpen low` (450 % of the original's pixels).
+- **Mouse:** left drag sideways = magnification (150 px doubles / halves it; 1.25 … 32 x), up / down = size (up larger; 80 px to the window's height); the mouse goes back to the lens' centre after the drag. **Wheel = sharpening** off / low / high (a notch at a time; user: "the lens is not a casual gimmick, its use is focused" — images aren't changed with the wheel while it is on; the tilt wheel still steps folders, and the zoom / rotate modes keep their wheel). **Wheel click = lock / unlock**: locked, the lens stays put (amber rim), the mouse is free (left drag selects in edit mode, measurements later). Right-click: the menu as always. The open panels keep their mouse.
+- **Drawing:** GPU: the image's textures again, scaled around the lens' centre, cut round and sharpened (unsharp mask from 4 neighbour texels) in the shader, a black disc behind, a dark / light rim; the tiles under the lens are uploaded first. Without shaders a square lens (scissor). CPU: the source pixels under the lens (the screen copy when the lens shows fewer than real pixels), sharpened at their own resolution, enlarged (squares from 4 x, smooth below), filtered, cut round. The display filters and Mirror apply in the lens too.
+- **Kept:** `[Magnifier] MagnificationPercent` (300), `Size` (300 px diameter), `Sharpen` (0), written on exit.
 
 ---
 
@@ -861,11 +906,14 @@ Next stages (Strategy_Phase_G.md): G6 magnifier, G4 filters; a settings page for
 - **Peek:** `Navigator.FileAtOffset(k)` returns the file *k* steps away in either direction, crossing directory boundaries, or "unknown" if that directory has not been listed yet. The scheduler uses it for preloading. "Unknown" makes the scanner list that neighbor directory at S1.
 - **Sorting:** date (newest → oldest default, oldest → newest optional) or **natural filename** (digit runs compare numerically, case-insensitive: `Image2 < Image10`). Changing sort mode re-sorts only the current directory's list and triggers a reconcile. Directories are always alphabetical (natural). *(v1.3: a zone with an order switches to it before navigating, §9.2.)*
 - *(v1.3)* **Parent folder** (gesture up): browsing restarts from the parent of the opened folder, keeping the current file ("browsing from …"; at a drive root: "already at the top").
+- *(Day 22, user)* **Climbing** (`[Navigation] ClimbUp=1`, off by default): a step that runs past the end of the tree (next / previous folder; next / previous image with `WrapScope=Tree`) doesn't wrap around. MView opens the root's parent (like Parent folder, keeping the current image) and, once that tree is scanned, does the same step again: it lands in the neighbouring folder of the old root. At that tree's end it climbs again, and so on, up to one level below a drive or network share (then it wraps as usual). Opening a single image or a sort-panel folder therefore no longer locks browsing inside that folder. `TNavigator.ClimbUp` / `ClimbWanted` / `CanClimbUp`, `TMView.ClimbUp`. With `WrapScope=Dir` image steps stay in the folder as before; the folder steps climb. Needs `Recursive=1`. While the folder above is read, further steps wait (the last one is done then; after 20 s they go on as usual); the decoded images are kept (also for Parent folder).
 - Files moved or deleted externally are detected when they fail to open. They are removed from the snapshot, and navigation continues. There is no file watcher in v1.
 
 ---
 
 ## 11. Startup sequence [Decision]
+
+*(Day 23)* **Only one instance** (`[Startup] OnlyOneInstance=1`, default; user: opening images from Total Commander must not start a new MView each time): before it makes a window, a second MView finds the running one (a named mutex; the handle of a hidden message-only window in a small named shared memory block, `uSingleInstance` — not the form's window: the LCL doesn't pass `WM_COPYDATA` on to a form, and going fullscreen makes the form's window again), sends it the file or folder as a full path (`WM_COPYDATA`, tagged), brings it to the front and ends. The running MView opens the path like a drop (the settings screen starts the viewer with it). A running MView that doesn't answer within 5 s, or has no window yet after 3 s, is left alone: the new one runs on its own.
 
 The first image has priority over everything, including knowing what directory it is in.
 
@@ -1019,6 +1067,7 @@ Rules (unchanged): the command line overrides the ini; only `TConfig` reads and 
 [Startup]
 LastDirectory= / LastFile=   ; written on exit
 StartFullscreen=0
+OnlyOneInstance=1       ; Day 23: an image / folder opened while MView runs (Total Commander) goes to the running MView
 [Window]                     ; *
 Left= / Top= / Width= / Height=  ; * written by MView: window place when not fullscreen (§11)
 [View]
@@ -1031,6 +1080,7 @@ SortMode=DateDescending ; DateAscending | FileNameAscending | FileNameDescending
 Recursive=1
 WrapAround=1
 WrapScope=Tree          ; Dir | Tree
+ClimbUp=0               ; Day 22: 1 = at the end of the tree browse on one level higher (up to one below the drive)
 PlaceholderForBadImages=1
 [Performance]
 PreloadCount=5          ; 0..20
@@ -1063,9 +1113,17 @@ EdgeWidth=12            ; px from the right edge that count as "at the edge" (96
 Pinned=0                ; the panel stays open
 DeletedFolder=          ; where "Delete" moves files; empty = Documents\MView deleted files
 IconFolder=             ; (next stage) button icons; empty = icons\ next to MView.exe
-TotalCommander=         ; (next stage) path of TOTALCMD64.EXE
+TotalCommander=         ; path of TOTALCMD64.EXE for side by side; empty = found by MView
+FollowTotalCommander=1  ; Day 23: 0 off, 1 its active panel's folder, 2 also the image under its cursor
 Slot1Folder= / Slot1Name= / Slot1Color= / Slot1Icon=   ; one group per button, written by MView
 Recent1= … Recent8=     ; folders chosen last, written by MView
+[Filters]               ; Day 22, §9.8
+Pinned=0                ; the filter panel (left edge) stays open
+AutoFilter=1            ; Auto black / white point for every image from the start
+[Magnifier]             ; Day 23, §9.9 (written on exit)
+MagnificationPercent=300 ; relative to the screen (300 = 3 x)
+Size=300                ; diameter in px
+Sharpen=0               ; 0 off, 1 low, 2 high
 ```
 
 Not used yet: `OpenLastSession` (see §11), `BackgroundScan`. *(v1.3: `[Mouse] Profile` and `MouseCursorHideTime` are now used.)*
@@ -1093,6 +1151,8 @@ Not used yet: `OpenLastSession` (see §11), `BackgroundScan`. *(v1.3: `[Mouse] P
 | `TestGif.lpr` *(new)* | 156 (user's run 02:14), 198 (16:11) | Every file in `test\images\gif` and Test.gif against `expected.txt` (size, frames, delays, a checksum of every frame); the **GIF test suite** (`animated_*.gif`, `static_*.gif`): every frame against its reference picture in `gif\frames` (transparent pixels by transparency only) and the loop counts; the first frame alone and from the start of a file only; a PNG named .gif; cut at every length; 300 random corruptions; frames claiming 65535 × 65535; cancel; memory limit; the frame clock (skipping, stalls, 1 and 2 plays). |
 
 *(Day 21)* `TestSort.lpr` (plain fpc): `UniqueFileName`, copy / move / missing source / missing folder / folder made on request / undo, the log, the mover thread (delivery in order on the main thread, freed with jobs waiting), and `TSortFolders` (slots, colours, move, remove, limits, the `[Sort]` round trip, stale keys removed). `TestNavigation` gets `TestRemoveAndAdd` (a file moved away and back: `RemoveFile`, `AddFile`, `SelectFile`).
+
+*(Day 22)* `TestFilters.lpr` (plain fpc, `uFilters` only): neutral settings change nothing, the tone table at a few grey levels for black / white point, brightness, contrast and gamma, saturation 0 = luma, hue keeps grey, invert, the prepared per-pixel path equals the plain one, ranges and the black / white gap, bar positions (gamma on a log scale), wheel steps snapping to neutral, the file name suffix.
 
 User's run 2026-09-27 16:11: 87 + 40 + 58 + 198 passed, 0 failed. `expected.txt` comes from `gifproto.py`, the Python copy of the decoder, checked against Pillow. See `test\images\gif\README.txt`.
 
@@ -1139,7 +1199,9 @@ Each phase ends with a compiling, usable viewer and a session log entry.
 | **D. GPU renderer** ✓ | Spike (§8.5), then textures, tiles, mipmaps, transform, time-sliced upload, CPU fallback. *(v1.2d: plus interim mouse profile, gestures, settings editor.)* | Pan at 1600 % on the largest test TIFF stays at 60 fps. *(Open: the test on the largest TIFF; now possible with the NASA images, §12.)* |
 | **E. Skim & quality levels** ✓ *(v1.3)* | Preview decode, Skim detection, refinement. *(v1.3: plus WIC quick views, own uncompressed and LZW TIFF readers, PNG / BMP through WIC, the failsafe against lockups, §5.6, §5.8, §7.5.)* | Holding the wheel never builds up lag. |
 | **F. Mouse engine** *(v1.3: built, in testing)* | Quadrants, gestures (up = parent folder), mouse profile file, cursor hide, graphical profile page in the settings editor, a way from the viewer back to the settings. *(v1.3: built as zones with names and orders, `Default.mouse`, "Mouse & keys" page with "Try it here", zones switch, minimal keyboard, paste and save. A way from the viewer back to the settings is not built.)* | Daily browsing without keyboard. |
-| **G. Later** | Edge move/copy menu, ~~GIF animation~~ *(v1.3: done, pulled forward)*, 16-bit windowing, multi-page TIFF, thumbnail cache, scripting, crop with rotation around the mouse *(v1.3: edit mode with select and crop started, §9.5)*, optimisation of the TIFF loaders, *(v1.3)* Fiji-derived filters and measurement tools. Movies: on the back burner (§8.7). | — |
+| **G. Sorting** *(Days 21–22: G1 built, released as v0.20.0-alpha; with Phase H and the Total Commander connection as v0.21.0-alpha)* | The sort panel at the right edge, copy / move / delete / undo, icons, side by side with Total Commander (§9.7). Still to come: G2 microscope metadata and G3 scale bar (with the new microscope's files), G5 measuring line, a settings page for the sort folders. | Sorting a session's images without leaving MView. |
+| **H. Looking closer** *(Day 22, proposed name; G4 / G6 in `Strategy_Phase_G.md`)* | Display filters, steps 1 and 2 built (§9.8): seven filters on GPU and CPU, the filter panel at the left edge, Lock filters, histogram, Auto (once / every image, the selection as ROI), Apply filters to a copy. Next: the magnifier (round lens, magnification relative to the screen, drag = magnification / size, wheel = sharpening off / low / high, wheel click = lock). | Faint structures visible without leaving MView; the view never mistaken for the data. |
+| **Later** | Edge move/copy menu, ~~GIF animation~~ *(v1.3: done, pulled forward)*, 16-bit windowing, multi-page TIFF, thumbnail cache, scripting, crop with rotation around the mouse *(v1.3: edit mode with select and crop started, §9.5)*, optimisation of the TIFF loaders, *(v1.3)* Fiji-derived filters and measurement tools. Movies: on the back burner (§8.7). | — |
 
 The GPU spike in phase D is independent of B and C, because the renderer only ever receives `IDecodedImage`. It can be done earlier if you want to settle the technology question first.
 

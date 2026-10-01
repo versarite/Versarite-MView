@@ -1,6 +1,6 @@
 @echo off
 rem Builds and runs the MView tests (TestNavigation.lpr, TestExif.lpr,
-rem TestMouse.lpr, TestSort.lpr, TestGif.lpi).
+rem TestMouse.lpr, TestSort.lpr, TestFilters.lpr, TestGif.lpi).
 rem Double-click this file, or run it from a command prompt.
 rem It uses the Free Pascal compiler that comes with Lazarus, so fpc
 rem does not need to be on the PATH.
@@ -37,6 +37,10 @@ echo Compiling TestSort.lpr ...
 "%FPC%" -FU. -Fu..\source\utility -Fu..\source\config TestSort.lpr
 if errorlevel 1 goto failed
 
+echo Compiling TestFilters.lpr ...
+"%FPC%" -FU. -Fu..\source\utility TestFilters.lpr
+if errorlevel 1 goto failed
+
 set GIFTEST=0
 if exist "%LAZBUILD%" (
   echo Building TestGif.lpi with lazbuild ...
@@ -56,6 +60,8 @@ echo.
 TestMouse.exe
 echo.
 TestSort.exe
+echo.
+TestFilters.exe
 echo.
 if "%GIFTEST%"=="1" TestGif.exe
 echo.

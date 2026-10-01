@@ -14,9 +14,11 @@ unit uRenderer;
 
   Owns
   ----
-  - TCpuRenderer: FRotated (a rotated copy, only while rotated) and
+  - TCpuRenderer: FRotated (a rotated copy, only while rotated),
     FDisplay (the scaled part of the image last drawn, a cache; freed
-    only when FDisplayOwned, since it may be the image's own bitmap).
+    only when FDisplayOwned, since it may be the image's own bitmap)
+    and FFiltered (FDisplay with the display filters, while any are
+    set).
   - The bitmap of a picture of the window, while it is saved.
 
   Knows
@@ -41,8 +43,11 @@ unit uRenderer;
   - Placeholder texts, the info line, the diagnostics line and the
     mode label ("ZOOM" / "ROTATE") as text; each renderer draws them.
   - Latency and paint time (spec §12).
+  - The display filters (Phase H, uFilters) and the pictures of the two
+    slide-out panels (sort panel right, filter panel left).
   - TCpuRenderer: paint image, edit-mode selection frame and overlays
-    onto a canvas; save a picture of the window as PNG on request.
+    onto a canvas; save a picture of the window as PNG on request. The
+    filters are applied to the screen-sized part only.
 
   Does NOT
   --------
@@ -57,7 +62,8 @@ unit uRenderer;
 
   Uses (MView units)
   ------------------
-  interface:      uCommands, uDecodedImage, uImageSaver, uStopwatch
+  interface:      uCommands, uDecodedImage, uFilters, uFilterImage, uImageSaver,
+                  uStopwatch
   Libraries:      Classes, Types, SysUtils, Math, Graphics,
                   BGRABitmap, BGRABitmapTypes
 
@@ -94,6 +100,8 @@ uses
   BGRABitmapTypes,
   uCommands,
   uDecodedImage,
+  uFilters,
+  uFilterImage,
   uImageSaver,
   uStopwatch;
 
@@ -114,6 +122,19 @@ type
   TImageRect = record
     Active: Boolean;
     X0, Y0, X1, Y1: Double;
+  end;
+
+  { The magnifier (Phase H, G6): a round lens at (X, Y) on screen,
+    showing what is under it Mag times larger than on screen (user:
+    "relative to screen"), Radius px; Sharpen 0 off, 1 low, 2 high;
+    Locked: it stays where it is (the mouse is free). }
+  TLensState = record
+    Active: Boolean;
+    Locked: Boolean;
+    X, Y: Double;
+    Radius: Double;
+    Mag: Double;
+    Sharpen: Integer;
   end;
 
   { ALatencyMs: from the command to the end of this paint.
@@ -139,6 +160,22 @@ type
     FPanel: TBGRABitmap;
     FPanelX, FPanelY: Integer;
     FPanelVersion: Cardinal;
+    { The filter panel (Phase H), at the left edge. }
+    FFilterPanel: TBGRABitmap;
+    FFilterPanelX, FFilterPanelY: Integer;
+    FFilterPanelVersion: Cardinal;
+    { The display filters (Phase H); FFilterVersion changes with them. }
+    FFilters: TFilterSettings;
+    FFilterVersion: Cardinal;
+    FLens: TLensState;
+    { A mode badge in the bottom right corner (user, Day 23: "TC" bold and
+      blinking while MView follows Total Commander); BadgeOn: the blink's
+      phase. The picture is made once per text. }
+    FBadgeText: string;
+    FBadgeStyle: Integer;        { 0 see-through (off), 1 light blue, 2 amber }
+    FBadgeOn: Boolean;
+    FBadgeBmp: TBGRABitmap;
+    FBadgeVersion: Cardinal;
     FEditMode: Boolean;
     FSelection: TImageRect;
     FOverlaySolid: Boolean;
@@ -175,6 +212,8 @@ type
     { Hooks for the subclasses. }
     procedure ImageChanged(AKeepView: Boolean); virtual;
     procedure TurnsChanged; virtual;
+    { Filters' Mirror switched (the CPU renderer remakes its copy). }
+    procedure MirrorChanged; virtual;
     { The angle the image is drawn at (the CPU renderer: quarter turns
       only). }
     function DrawAngle: Double; virtual;
@@ -230,6 +269,10 @@ type
       piling up frames. }
     function IsUploading: Boolean; virtual;
 
+    { The image's size on screen, in pixels (original size x the scale
+      of the last paint); False while nothing has been drawn. }
+    function ShownSize(out AWidth, AHeight: Integer): Boolean;
+
     { Debugging: save a PNG of what the window shows (image, zoom,
       rotation, text bars). The CPU renderer does it at once, the GPU
       renderer at the end of the next frame. TakeScreenshotResult
@@ -274,6 +317,36 @@ type
     property PanelX: Integer read FPanelX;
     property PanelY: Integer read FPanelY;
     property PanelVersion: Cardinal read FPanelVersion;
+    { The filter panel's picture, the same way (left edge). }
+    procedure SetFilterPanel(ABitmap: TBGRABitmap; AX, AY: Integer; AVersion: Cardinal);
+    property FilterPanel: TBGRABitmap read FFilterPanel;
+    property FilterPanelX: Integer read FFilterPanelX;
+    property FilterPanelY: Integer read FFilterPanelY;
+    property FilterPanelVersion: Cardinal read FFilterPanelVersion;
+    { The display filters (uFilters); only the picture on screen changes,
+      never the image. }
+    procedure SetFilters(const AFilters: TFilterSettings);
+    property Filters: TFilterSettings read FFilters;
+    property FilterVersion: Cardinal read FFilterVersion;
+    { False if this renderer can't show the filters (a GPU without
+      shaders); TMView says so instead of pretending. }
+    function FiltersAvailable: Boolean; virtual;
+    { The mode badge ('' = none) and its blink (shown while BadgeOn). }
+    { AStyle: 0 see-through (an outline: the mode is off), 1 light blue,
+      2 amber. }
+    procedure SetBadge(const AText: string; AStyle: Integer = 2);
+    property BadgeStyle: Integer read FBadgeStyle;
+    { Room the info line leaves for the badge at its right end (px). }
+    function BadgeRoom: Integer;
+    { The badge is under this point of the view (the last paint's size). }
+    function BadgeHit(AX, AY: Integer): Boolean;
+    property BadgeText: string read FBadgeText;
+    property BadgeOn: Boolean read FBadgeOn write FBadgeOn;
+    { Its picture (nil = none); BadgeVersion changes with it. }
+    function BadgeBitmap: TBGRABitmap;
+    property BadgeVersion: Cardinal read FBadgeVersion;
+    { The magnifier: drawn over the image (under the texts and panels). }
+    property Lens: TLensState read FLens write FLens;
     property OnImagePainted: TImagePaintedEvent read FOnImagePainted write FOnImagePainted;
     property View: TViewState read FView;
   end;
@@ -284,9 +357,12 @@ type
   private
     FRotated: TBGRACustomBitmap;
     FRotatedTurns: Integer;      { quarter turns FRotated was made for }
+    FRotatedMirror: Boolean;     { ... and whether mirrored }
     FDisplay: TBGRACustomBitmap;
     FDisplayOwned: Boolean;      { False if FDisplay is FImage's own bitmap }
     FDisplayKey: string;         { what FDisplay currently shows }
+    FFiltered: TBGRACustomBitmap; { FDisplay with the filters (owned) }
+    FFilteredKey: string;
     FNote: string;               { e.g. why the GPU isn't used }
 
     function SourceBitmap: TBGRACustomBitmap;
@@ -294,6 +370,7 @@ type
     procedure ClearRotated;
     procedure RebuildRotated;
     procedure DrawImage(ACanvas: TCanvas; AWidth, AHeight: Integer);
+    procedure DrawLens(ACanvas: TCanvas; AWidth, AHeight: Integer);
     procedure DrawCenteredText(ACanvas: TCanvas; AWidth, AHeight: Integer; const ALines: array of string);
     function DrawBar(ACanvas: TCanvas; AWidth, ABottom: Integer; const AText: string;
       ASolid: Boolean = False): Integer;
@@ -301,6 +378,7 @@ type
   protected
     procedure ImageChanged(AKeepView: Boolean); override;
     procedure TurnsChanged; override;
+    procedure MirrorChanged; override;
     function DrawAngle: Double; override;
   public
     destructor Destroy; override;
@@ -311,6 +389,10 @@ type
     property Note: string read FNote write FNote;
   end;
 
+{ The magnifier's sharpening per level (0 off, 1 low, 2 high): the
+  amount of the unsharp mask (both renderers). }
+function LensSharpenAmount(ALevel: Integer): Single;
+
 const
   { Typed, so Min/Max pick the Double overload without ambiguity. }
   MinZoom: Double = 1 / 64;
@@ -320,6 +402,26 @@ implementation
 
 const
   ZeroD: Double = 0;
+
+function LensSharpenAmount(ALevel: Integer): Single;
+begin
+  case ALevel of
+    1: Result := 0.6;
+    2: Result := 1.4;
+  else
+    Result := 0;
+  end;
+end;
+
+function LensSharpenName(ALevel: Integer): string;
+begin
+  case ALevel of
+    1: Result := 'low';
+    2: Result := 'high';
+  else
+    Result := 'off';
+  end;
+end;
 
 { The lines of AText (CR LF or LF). }
 function SplitAtLineBreaks(const AText: string): TStringArray;
@@ -362,13 +464,94 @@ begin
   FView.PanX := 0;
   FView.PanY := 0;
   FView.Angle := 0;
+  FFilters := NeutralFilters;
   SetOverlayColorName('White');
 end;
 
 destructor TRenderer.Destroy;
 begin
   FImage := nil;
+  FBadgeBmp.Free;
   inherited Destroy;
+end;
+
+procedure TRenderer.SetBadge(const AText: string; AStyle: Integer);
+begin
+  if (AText = FBadgeText) and (AStyle = FBadgeStyle) then
+    Exit;
+  FBadgeText := AText;
+  FBadgeStyle := AStyle;
+  FreeAndNil(FBadgeBmp);
+  Inc(FBadgeVersion);
+end;
+
+function TRenderer.BadgeRoom: Integer;
+begin
+  Result := 0;
+  if FBadgeOn and (BadgeBitmap <> nil) then
+    Result := BadgeBitmap.Width + 16;
+end;
+
+function TRenderer.BadgeHit(AX, AY: Integer): Boolean;
+var
+  Bmp: TBGRABitmap;
+  X0, Y0: Integer;
+begin
+  Result := False;
+  if not FBadgeOn then
+    Exit;
+  Bmp := BadgeBitmap;
+  if (Bmp = nil) or (FSurfaceWidth <= 0) or (FSurfaceHeight <= 0) then
+    Exit;
+  { As drawn: 8 px from the right, 6 px from the bottom (a little room
+    around it, so it is easy to hit). }
+  X0 := FSurfaceWidth - Bmp.Width - 8;
+  Y0 := FSurfaceHeight - Bmp.Height - 6;
+  Result := (AX >= X0 - 3) and (AX < X0 + Bmp.Width + 3)
+    and (AY >= Y0 - 3) and (AY < Y0 + Bmp.Height + 3);
+end;
+
+{ Bold dark text on a rounded label: light blue or amber; see-through
+  (a light outline and faint text) when the mode is off. }
+function TRenderer.BadgeBitmap: TBGRABitmap;
+var
+  TS: TSize;
+begin
+  Result := nil;
+  if FBadgeText = '' then
+    Exit;
+  if FBadgeBmp = nil then
+  begin
+    FBadgeBmp := TBGRABitmap.Create(1, 1);
+    FBadgeBmp.FontHeight := 18;
+    FBadgeBmp.FontStyle := [fsBold];
+    FBadgeBmp.FontQuality := fqSystemClearType;
+    TS := FBadgeBmp.TextSize(FBadgeText);
+    FBadgeBmp.SetSize(TS.cx + 16, TS.cy + 6);
+    FBadgeBmp.Fill(BGRAPixelTransparent);
+    case FBadgeStyle of
+      1:
+        begin
+          FBadgeBmp.FillRoundRectAntialias(0, 0, FBadgeBmp.Width - 1, FBadgeBmp.Height - 1, 5, 5,
+            BGRA(140, 200, 255, 240));
+          FBadgeBmp.TextOut(8, 3, FBadgeText, BGRA(20, 20, 20, 255));
+        end;
+      2:
+        begin
+          FBadgeBmp.FillRoundRectAntialias(0, 0, FBadgeBmp.Width - 1, FBadgeBmp.Height - 1, 5, 5,
+            BGRA(255, 190, 60, 240));
+          FBadgeBmp.TextOut(8, 3, FBadgeText, BGRA(20, 20, 20, 255));
+        end;
+    else
+      { Off: an outline, the text faint (no ClearType on transparent). }
+      FBadgeBmp.FontQuality := fqSystem;
+      FBadgeBmp.RoundRectAntialias(0.5, 0.5, FBadgeBmp.Width - 1.5, FBadgeBmp.Height - 1.5, 5, 5,
+        BGRA(220, 220, 220, 110), 1);
+      FBadgeBmp.TextOut(8, 3, FBadgeText, BGRA(220, 220, 220, 110));
+    end;
+    Inc(FBadgeVersion);
+  end;
+  Result := FBadgeBmp;
 end;
 
 procedure TRenderer.ImageChanged(AKeepView: Boolean);
@@ -376,6 +559,10 @@ begin
 end;
 
 procedure TRenderer.TurnsChanged;
+begin
+end;
+
+procedure TRenderer.MirrorChanged;
 begin
 end;
 
@@ -613,13 +800,21 @@ begin
 end;
 
 function TRenderer.InfoLine: string;
+var
+  W, H: Integer;
 begin
   Result := '';
   if not FShowInfo then
     Exit;
   Result := FInfoText;
+  { The scale, and the size on screen in pixels (user, Day 22: "it
+    replaces a resize function"; Resize to the size shown makes it). }
   if FLastScale > 0 then
+  begin
     Result := Result + Format('   %d %%', [Round(FLastScale * 100)]);
+    if ShownSize(W, H) then
+      Result := Result + Format(' = %d x %d', [W, H]);
+  end;
   if (FImage <> nil) and (FView.Angle <> 0) then
     Result := Result + Format('   %.0f°', [FView.Angle]);
 end;
@@ -648,12 +843,29 @@ begin
       Result := Format('ROTATE   %.0f°      wheel = turn,   X2 / Esc = back',
         [FView.Angle]);
   else
-    if FEditMode then
-      Result := 'EDIT      left drag = select an area,   right click: Crop selection,   '
+    if FLens.Active then
+    begin
+      Result := Format('LENS   %.1f x  = %d %%   %d px   sharpen %s',
+        [FLens.Mag, Round(FLastScale * FLens.Mag * 100), Round(2 * FLens.Radius),
+         LensSharpenName(FLens.Sharpen)]);
+      if FLens.Locked then
+        Result := Result + '   LOCKED      wheel click = free'
+      else
+        Result := Result + '      left drag: <-> magnification, up / down size,   wheel: sharpen,   '
+          + 'wheel click: lock,   Esc: off';
+      if FEditMode then
+        Result := 'EDIT ON   |   ' + Result;
+    end
+    else if FEditMode then
+      Result := 'EDIT ON      left drag = select an area,   right click: Crop selection,   '
         + 'double-click in the Edit zone / Esc = end'
     else
       Result := '';
   end;
+  { Edit mode stays on while zooming or turning (user, Day 23): said at
+    the start of the zoom / rotate line, which takes the same place. }
+  if FEditMode and (FInputMode in [imZoom, imRotate]) then
+    Result := 'EDIT ON   |   ' + Result;
 end;
 
 procedure TRenderer.PlaceholderLines(out ALines: TStringArray);
@@ -728,7 +940,11 @@ begin
   Rad := DegToRad(DrawAngle);
   C := Cos(Rad);
   S := Sin(Rad);
-  AImgX := (DX * C + DY * S) / Scale + LogW / 2;
+  { Mirrored: the image's x runs the other way (before the turn). }
+  if FFilters.Mirror then
+    AImgX := -(DX * C + DY * S) / Scale + LogW / 2
+  else
+    AImgX := (DX * C + DY * S) / Scale + LogW / 2;
   AImgY := (-DX * S + DY * C) / Scale + LogH / 2;
   Result := True;
 end;
@@ -742,6 +958,8 @@ begin
   Scale := ScaleFor(FSurfaceWidth, FSurfaceHeight);
   DX := (AImgX - LogW / 2) * Scale;
   DY := (AImgY - LogH / 2) * Scale;
+  if FFilters.Mirror then
+    DX := -DX;
   Rad := DegToRad(DrawAngle);
   C := Cos(Rad);
   S := Sin(Rad);
@@ -774,6 +992,20 @@ end;
 function TRenderer.IsUploading: Boolean;
 begin
   Result := False;
+end;
+
+function TRenderer.ShownSize(out AWidth, AHeight: Integer): Boolean;
+var
+  LogW, LogH: Integer;
+begin
+  AWidth := 0;
+  AHeight := 0;
+  LogicalSize(LogW, LogH);
+  Result := (FLastScale > 0) and (LogW > 0) and (LogH > 0);
+  if not Result then
+    Exit;
+  AWidth := Max(1, Round(LogW * FLastScale));
+  AHeight := Max(1, Round(LogH * FLastScale));
 end;
 
 function TRenderer.Description: string;
@@ -855,12 +1087,15 @@ begin
   FDisplay := nil;
   FDisplayOwned := False;
   FDisplayKey := '';
+  FreeAndNil(FFiltered);
+  FFilteredKey := '';
 end;
 
 procedure TCpuRenderer.ClearRotated;
 begin
   FreeAndNil(FRotated);
   FRotatedTurns := 0;
+  FRotatedMirror := False;
 end;
 
 function TCpuRenderer.SourceBitmap: TBGRACustomBitmap;
@@ -877,7 +1112,7 @@ procedure TCpuRenderer.ImageChanged(AKeepView: Boolean);
 begin
   ClearDisplay;
   ClearRotated;
-  if QuarterTurns <> 0 then
+  if (QuarterTurns <> 0) or Filters.Mirror then
     RebuildRotated;
 end;
 
@@ -886,26 +1121,59 @@ begin
   RebuildRotated;
 end;
 
+procedure TCpuRenderer.MirrorChanged;
+begin
+  RebuildRotated;
+end;
+
 procedure TCpuRenderer.RebuildRotated;
 var
-  Src: TBGRABitmap;
+  Src, Mirrored: TBGRABitmap;
 begin
   ClearDisplay;
   ClearRotated;
   if (FImage = nil) or FImage.IsError then
     Exit;
 
+  { Mirrored first (in the image), then turned: as ImageToScreen. }
   Src := FImage.Bitmap;
-  case QuarterTurns of
-    1: FRotated := Src.RotateCW as TBGRACustomBitmap;
-    2: begin
-         FRotated := Src.Duplicate as TBGRACustomBitmap;
-         FRotated.HorizontalFlip;
-         FRotated.VerticalFlip;
-       end;
-    3: FRotated := Src.RotateCCW as TBGRACustomBitmap;
+  Mirrored := nil;
+  try
+    if Filters.Mirror then
+    begin
+      Mirrored := Src.Duplicate as TBGRABitmap;
+      Mirrored.HorizontalFlip;
+      Src := Mirrored;
+    end;
+    case QuarterTurns of
+      1: FRotated := Src.RotateCW as TBGRACustomBitmap;
+      2: if Mirrored <> nil then
+         begin
+           { Mirrored and turned 180 degrees: upside down, one copy. }
+           Mirrored.HorizontalFlip;
+           Mirrored.VerticalFlip;
+           FRotated := Mirrored;
+           Mirrored := nil;
+         end
+         else
+         begin
+           FRotated := Src.Duplicate as TBGRACustomBitmap;
+           FRotated.HorizontalFlip;
+           FRotated.VerticalFlip;
+         end;
+      3: FRotated := Src.RotateCCW as TBGRACustomBitmap;
+    else
+      if Mirrored <> nil then
+      begin
+        FRotated := Mirrored;     { handed over }
+        Mirrored := nil;
+      end;
+    end;
+  finally
+    Mirrored.Free;
   end;
   FRotatedTurns := QuarterTurns;
+  FRotatedMirror := Filters.Mirror;
 end;
 
 procedure TRenderer.SetPanel(ABitmap: TBGRABitmap; AX, AY: Integer; AVersion: Cardinal);
@@ -914,6 +1182,32 @@ begin
   FPanelX := AX;
   FPanelY := AY;
   FPanelVersion := AVersion;
+end;
+
+procedure TRenderer.SetFilterPanel(ABitmap: TBGRABitmap; AX, AY: Integer; AVersion: Cardinal);
+begin
+  FFilterPanel := ABitmap;
+  FFilterPanelX := AX;
+  FFilterPanelY := AY;
+  FFilterPanelVersion := AVersion;
+end;
+
+procedure TRenderer.SetFilters(const AFilters: TFilterSettings);
+var
+  OldMirror: Boolean;
+begin
+  if SameFilters(AFilters, FFilters) then
+    Exit;
+  OldMirror := FFilters.Mirror;
+  FFilters := AFilters;
+  Inc(FFilterVersion);
+  if OldMirror <> FFilters.Mirror then
+    MirrorChanged;
+end;
+
+function TRenderer.FiltersAvailable: Boolean;
+begin
+  Result := True;
 end;
 
 procedure TCpuRenderer.Paint(ACanvas: TCanvas; AWidth, AHeight: Integer);
@@ -940,6 +1234,9 @@ begin
   else
   begin
     DrawImage(ACanvas, AWidth, AHeight);
+    { The magnifier, over the image (the frame stays on top, as on the
+      GPU). }
+    DrawLens(ACanvas, AWidth, AHeight);
     { Edit mode: the selection, dark and light so it shows on any image. }
     if SelectionCorners(Corners) then
     begin
@@ -960,9 +1257,15 @@ begin
   NewImagePainted := EndImagePart(StartMs);
 
   DrawOverlays(ACanvas, AWidth, AHeight);
+  { The mode badge, bottom right (blinking: drawn while BadgeOn). }
+  if FBadgeOn and (BadgeBitmap <> nil) then
+    BadgeBitmap.Draw(ACanvas, AWidth - BadgeBitmap.Width - 8,
+      AHeight - BadgeBitmap.Height - 6, False);
   { The sort panel, on top (with its transparency). }
   if Assigned(Panel) then
     Panel.Draw(ACanvas, PanelX, PanelY, False);
+  if Assigned(FilterPanel) then
+    FilterPanel.Draw(ACanvas, FilterPanelX, FilterPanelY, False);
 
   if NewImagePainted then
     ReportPainted;
@@ -984,7 +1287,7 @@ var
   Key: string;
   Mode: TResampleMode;
 begin
-  if FRotatedTurns <> QuarterTurns then
+  if (FRotatedTurns <> QuarterTurns) or (FRotatedMirror <> Filters.Mirror) then
     RebuildRotated;
   Src := SourceBitmap;
   if (Src = nil) or (Src.Width <= 0) or (Src.Height <= 0) then
@@ -1047,8 +1350,9 @@ begin
   RW := Max(1, Round(X0 + SX1 * Scale) - RX0);
   RH := Max(1, Round(Y0 + SY1 * Scale) - RY0);
 
-  Key := Format('%d,%d,%d,%d>%d,%d|%d|%s',
-    [SX0, SY0, SX1, SY1, RW, RH, FRotatedTurns, BoolToStr(UsePreview, 'P', 'F')]);
+  Key := Format('%d,%d,%d,%d>%d,%d|%d|%s|%s',
+    [SX0, SY0, SX1, SY1, RW, RH, FRotatedTurns, BoolToStr(UsePreview, 'P', 'F'),
+     BoolToStr(FRotatedMirror, 'M', '-')]);
   if (FDisplay = nil) or (Key <> FDisplayKey) then
   begin
     ClearDisplay;
@@ -1092,7 +1396,186 @@ begin
     FDisplayKey := Key;
   end;
 
-  FDisplay.Draw(ACanvas, RX0, RY0, True);
+  { The filters: on a copy of the screen-sized part only (a few million
+    pixels at most), made again when the part or the filters change. }
+  if not ColourNeutral(Filters) then
+  begin
+    Key := FDisplayKey + '#' + IntToStr(FilterVersion);
+    if (FFiltered = nil) or (Key <> FFilteredKey) then
+    begin
+      FreeAndNil(FFiltered);
+      FFiltered := FDisplay.Duplicate as TBGRACustomBitmap;
+      ApplyFiltersToBitmap(FFiltered, Filters);
+      FFilteredKey := Key;
+    end;
+    FFiltered.Draw(ACanvas, RX0, RY0, True);
+  end
+  else
+  begin
+    if Assigned(FFiltered) then
+    begin
+      FreeAndNil(FFiltered);    { back to neutral: the copy isn't needed }
+      FFilteredKey := '';
+    end;
+    FDisplay.Draw(ACanvas, RX0, RY0, True);
+  end;
+end;
+
+{ The magnifier: what lies under the lens, Mag times larger than on
+  screen, from the full image (not the screen-sized copy: the point is
+  to see its real pixels), sharpened, filtered, cut round, with a dark
+  and a light rim. Small (the lens' size), made again every paint. }
+procedure TCpuRenderer.DrawLens(ACanvas: TCanvas; AWidth, AHeight: Integer);
+const
+  NearestFrom = 4.0;       { as the GPU: from 4 x on, pixels are squares }
+  MaxPartPixels = 4000000; { more source pixels than this: sampled, not resampled }
+var
+  L: TLensState;
+  Src: TBGRACustomBitmap;
+  Part, Scaled, LensBmp: TBGRABitmap;
+  LogW, LogH, D, SX0, SY0, SX1, SY1, RX, RY, RW, RH, X, Y, SXI, SYI: Integer;
+  Scale, S2, X0, Y0, LX0, LY0, R, DX, DY: Double;
+  P, SrcRow: PBGRAPixel;
+begin
+  L := Lens;
+  if (not L.Active) or (FImage = nil) or FImage.IsError or (L.Radius < 4) or (L.Mag <= 0) then
+    Exit;
+  if (FRotatedTurns <> QuarterTurns) or (FRotatedMirror <> Filters.Mirror) then
+    RebuildRotated;
+  Src := SourceBitmap;
+  if (Src = nil) or (Src.Width <= 0) or (Src.Height <= 0) then
+    Exit;
+  TurnedLogicalSize(LogW, LogH);
+  Scale := ScaleFor(AWidth, AHeight);
+  if (Scale <= 0) or (LogW <= 0) then
+    Exit;
+  { Less than the real pixels in the lens (a large image, zoomed out):
+    the screen-size copy is enough and far smaller (as DrawImage, only
+    without turns or mirror). }
+  if (FRotated = nil) and Assigned(FImage.Preview)
+    and (LogW * Scale * L.Mag <= FImage.Preview.Width + 0.5) then
+    Src := FImage.Preview;
+  { Bitmap pixels -> screen, as in DrawImage; then around the lens'
+    centre, Mag times. }
+  Scale := Scale * LogW / Src.Width;
+  X0 := (AWidth - Src.Width * Scale) / 2 + FView.PanX;
+  Y0 := (AHeight - Src.Height * Scale) / 2 + FView.PanY;
+  S2 := Scale * L.Mag;
+  LX0 := L.X + (X0 - L.X) * L.Mag;
+  LY0 := L.Y + (Y0 - L.Y) * L.Mag;
+  R := L.Radius;
+  D := Max(8, Round(2 * R));
+
+  { The source pixels under the lens, one more on each side (for the
+    sharpening). }
+  SX0 := Max(0, Floor((L.X - R - LX0) / S2) - 1);
+  SY0 := Max(0, Floor((L.Y - R - LY0) / S2) - 1);
+  SX1 := Min(Src.Width, Ceil((L.X + R - LX0) / S2) + 1);
+  SY1 := Min(Src.Height, Ceil((L.Y + R - LY0) / S2) + 1);
+
+  LensBmp := TBGRABitmap.Create(D, D, BGRA(0, 0, 0, 255));
+  try
+    if (SX1 > SX0) and (SY1 > SY0) then
+    begin
+      if Int64(SX1 - SX0) * (SY1 - SY0) <= MaxPartPixels then
+      begin
+        { Sharpened at the image's own pixels (as the GPU, per texel),
+          then made larger. }
+        Part := Src.GetPart(Rect(SX0, SY0, SX1, SY1)) as TBGRABitmap;
+        try
+          SharpenBitmap(Part, LensSharpenAmount(L.Sharpen));
+          if S2 >= NearestFrom then
+          begin
+            { Each lens pixel takes its source pixel (squares). }
+            for Y := 0 to D - 1 do
+            begin
+              SYI := Floor((L.Y - R + Y + 0.5 - LY0) / S2) - SY0;
+              if (SYI < 0) or (SYI >= Part.Height) then
+                Continue;
+              SrcRow := Part.ScanLine[SYI];
+              P := LensBmp.ScanLine[Y];
+              for X := 0 to D - 1 do
+              begin
+                SXI := Floor((L.X - R + X + 0.5 - LX0) / S2) - SX0;
+                if (SXI >= 0) and (SXI < Part.Width) then
+                  P[X] := SrcRow[SXI];
+              end;
+            end;
+            LensBmp.InvalidateBitmap;
+          end
+          else
+          begin
+            RX := Round(LX0 + SX0 * S2 - (L.X - R));
+            RY := Round(LY0 + SY0 * S2 - (L.Y - R));
+            RW := Max(1, Round(LX0 + SX1 * S2) - Round(LX0 + SX0 * S2));
+            RH := Max(1, Round(LY0 + SY1 * S2) - Round(LY0 + SY0 * S2));
+            Scaled := Part.Resample(RW, RH, rmFineResample) as TBGRABitmap;
+            try
+              LensBmp.PutImage(RX, RY, Scaled, dmSet);
+            finally
+              Scaled.Free;
+            end;
+          end;
+        finally
+          Part.Free;
+        end;
+      end
+      else
+      begin
+        { Very many source pixels (a huge image far out, no screen copy):
+          sampled, each lens pixel one source pixel; fast, a little rough. }
+        for Y := 0 to D - 1 do
+        begin
+          SYI := Floor((L.Y - R + Y + 0.5 - LY0) / S2);
+          if (SYI < 0) or (SYI >= Src.Height) then
+            Continue;
+          SrcRow := Src.ScanLine[SYI];
+          P := LensBmp.ScanLine[Y];
+          for X := 0 to D - 1 do
+          begin
+            SXI := Floor((L.X - R + X + 0.5 - LX0) / S2);
+            if (SXI >= 0) and (SXI < Src.Width) then
+              P[X] := SrcRow[SXI];
+          end;
+        end;
+        LensBmp.InvalidateBitmap;
+      end;
+    end;
+
+    if not ColourNeutral(Filters) then
+      ApplyFiltersToBitmap(LensBmp, Filters);
+
+    { Round: outside the circle transparent. }
+    for Y := 0 to D - 1 do
+    begin
+      P := LensBmp.ScanLine[Y];
+      DY := Y + 0.5 - D / 2;
+      for X := 0 to D - 1 do
+      begin
+        DX := X + 0.5 - D / 2;
+        if DX * DX + DY * DY > (D / 2) * (D / 2) then
+          P[X].alpha := 0;
+      end;
+    end;
+    LensBmp.InvalidateBitmap;
+    LensBmp.Draw(ACanvas, Round(L.X - D / 2), Round(L.Y - D / 2), False);
+  finally
+    LensBmp.Free;
+  end;
+
+  { The rim: dark under light, so it shows on any image. }
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.Pen.Style := psSolid;
+  ACanvas.Pen.Color := clBlack;
+  ACanvas.Pen.Width := 3;
+  ACanvas.Ellipse(Round(L.X - D / 2), Round(L.Y - D / 2), Round(L.X + D / 2), Round(L.Y + D / 2));
+  if L.Locked then
+    ACanvas.Pen.Color := RGBToColor(255, 190, 60)
+  else
+    ACanvas.Pen.Color := clWhite;
+  ACanvas.Pen.Width := 1;
+  ACanvas.Ellipse(Round(L.X - D / 2), Round(L.Y - D / 2), Round(L.X + D / 2), Round(L.Y + D / 2));
+  ACanvas.Brush.Style := bsSolid;
 end;
 
 procedure TCpuRenderer.DrawCenteredText(ACanvas: TCanvas; AWidth, AHeight: Integer;
@@ -1119,6 +1602,23 @@ end;
   black outline so it reads on bright images too (no box behind it).
   Its bottom edge is at ABottom. Returns the top edge, where the next
   line can sit. }
+{ AText cut with "..." to AMaxWidth px (0: as it is). }
+function FitCanvasText(ACanvas: TCanvas; const AText: string; AMaxWidth: Integer): string;
+var
+  N: Integer;
+begin
+  Result := AText;
+  if (AMaxWidth <= 0) or (ACanvas.TextWidth(Result) <= AMaxWidth) then
+    Exit;
+  N := Length(AText);
+  while (N > 0) and (ACanvas.TextWidth(Copy(AText, 1, N) + '...') > AMaxWidth) do
+    Dec(N);
+  { Not inside a UTF-8 character. }
+  while (N > 0) and ((Ord(AText[N + 1]) and $C0) = $80) do
+    Dec(N);
+  Result := Copy(AText, 1, N) + '...';
+end;
+
 function TCpuRenderer.DrawBar(ACanvas: TCanvas; AWidth, ABottom: Integer; const AText: string;
   ASolid: Boolean): Integer;
 var
@@ -1177,7 +1677,12 @@ begin
 
   Text := InfoLine;
   if Text <> '' then
+  begin
+    { It ends before the mode badge (bottom right). }
+    ACanvas.Font.Height := -13;
+    Text := FitCanvasText(ACanvas, Text, AWidth - 16 - BadgeRoom);
     Bottom := DrawBar(ACanvas, AWidth, Bottom, Text, OverlaySolid);
+  end;
 
   { The diagnostics may have several lines: the last at the bottom. }
   Text := DiagnosticsLine;

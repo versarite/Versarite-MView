@@ -246,3 +246,7 @@ Next session
   tests and build_test.bat, .gitignore (build output, MView.ini,
   sorting.log, timing.csv / startup.csv, private test images), release
   notes for the new version.
+
+Tests (user's run, 2026-09-29 evening): TestNavigation 99, TestExif 40,
+TestMouse 79, TestSort 80 (first run), TestGif 198: 496 passed, 0 failed.
+Released as v0.20.0-alpha (release notes, readme, About box updated).

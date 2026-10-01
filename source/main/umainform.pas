@@ -66,6 +66,22 @@ unit uMainForm;
     folder" and "Icon" (by name, none, the icon folder's icons with
     their pictures, choose a file, open the icon folder); icon files
     dropped on a button.
+  - Only one instance ([Startup] OnlyOneInstance, uSingleInstance): a
+    second MView's file or folder arrives through HandleHandedOver and
+    is opened like a drop (not onto the sort panel); the window comes to
+    the front.
+  - The magnifier: the menu entry "Magnifier (lens)" (ticked while on);
+    the view's cursor is TMView.ViewCursor (a cross while the lens
+    follows the mouse).
+  - Looking closer (Phase H): the menu entries "Filters (side menu,
+    left)", "Lock filters" (checked when on) and "Apply filters to a
+    copy" (enabled while a filter is set); "Resize to the size shown
+    (W x H)".
+  - "Follow Total Commander" (Off / Its folder / Its folder and the image
+    under its cursor): TMView.SetFollowMode.
+  - The settings screen's "Total Commander side by side" (OnSideBySide):
+    the last session's folder, else Documents; its own timer waits for a
+    Total Commander just started.
   - Side by side with Total Commander (menu, command SideBySide): MView
     the left half of its screen's work area, Total Commander the right
     half in the image's folder (uTotalCommander; a just started one is
@@ -160,6 +176,13 @@ type
       go back to, and a Total Commander just started that is still to be
       placed (its window appears a moment later). }
     FSideItem: TMenuItem;
+    { Looking closer (Phase H): "Lock filters" (checked when on). }
+    FLockFiltersItem: TMenuItem;
+    FApplyFiltersItem: TMenuItem;
+    FResizeItem: TMenuItem;
+    FMagnifierItem: TMenuItem;
+    { Follow Total Commander (Day 23): off / folder / folder and cursor. }
+    FFollowItems: array[0..2] of TMenuItem;
     FSideBySide: Boolean;
     FSideWasFullscreen: Boolean;
     FSideBounds: TRect;
@@ -167,6 +190,14 @@ type
     FSideRight: TRect;
     FSideWaitUntil: QWord;       { 0 = not waiting }
     FSideAgainAt: QWord;         { place it once more then (it may move itself); 0 = no }
+    { The same on the settings screen: its own timer (the viewer's isn't
+      running there). }
+    FEditorSideTimer: TTimer;
+    FEditorSideUntil: QWord;     { waiting for a Total Commander just started; 0 = no }
+    FEditorSideAgainAt: QWord;
+    { Only one instance (Day 23): a path handed over by a second MView,
+      opened right after its message (not inside it: it waits). }
+    FHandedOverPath: string;
     FStarted: Boolean;
     FFullscreen: Boolean;
     FNormalBounds: TRect;
@@ -194,6 +225,10 @@ type
     procedure HandleDropFiles(Sender: TObject; const FileNames: array of string);
     procedure HandleFormClose(Sender: TObject; var CloseAction: TCloseAction);
     procedure HandleEditorExit(Sender: TObject);
+    { "Total Commander side by side" on the settings screen (Day 22). }
+    procedure HandleEditorSideBySide(Sender: TObject);
+    procedure HandleEditorSideTimer(Sender: TObject);
+    procedure OpenHandedOver(AData: PtrInt);
     procedure CreateView;
     function TryCreateGLView(out AReason: string): Boolean;
     function ViewInput: TMouseEngine;
@@ -229,6 +264,12 @@ type
     procedure HandleSortIconFolderClick(Sender: TObject);
     procedure HandleMakeIconMenuClick(Sender: TObject);
     procedure HandleSideBySideMenuClick(Sender: TObject);
+    procedure HandleFilterPanelMenuClick(Sender: TObject);
+    procedure HandleLockFiltersMenuClick(Sender: TObject);
+    procedure HandleApplyFiltersMenuClick(Sender: TObject);
+    procedure HandleResizeMenuClick(Sender: TObject);
+    procedure HandleMagnifierMenuClick(Sender: TObject);
+    procedure HandleFollowMenuClick(Sender: TObject);
     procedure ToggleSideBySide;
     procedure PlaceTotalCommander(AWindow: THandle);
     procedure CheckSideBySideWait;
@@ -243,6 +284,10 @@ type
     function CurrentNormalBounds(out ARect: TRect): Boolean;
     procedure RememberBounds;
     procedure HandleChangeBounds(Sender: TObject);
+  public
+    { Only one instance: a second MView's file or folder ('' = just come
+      to the front); MView.lpr hands it to uSingleInstance's listener. }
+    procedure HandleHandedOver(const APath: string);
   end;
 
 var
@@ -266,7 +311,7 @@ uses
 const
   { The About box: what MView is, and where it comes from. }
   AboutText =
-    'Versarite MView 0.20.0-alpha' + LineEnding +
+    'Versarite MView 0.21.0-alpha' + LineEnding +
     'A microscopy image viewer, driven by the mouse.' + LineEnding +
     LineEnding +
     'Written with support from Claude/Opus 5.5 and ChatGPT' + LineEnding +
@@ -336,6 +381,7 @@ end;
 procedure TMainForm.CreateViewer;
 var
   Item: TMenuItem;
+  FollowIndex: Integer;
   ViewStartMs: Double;
 begin
   FMView := TMView.Create;
@@ -368,6 +414,12 @@ begin
   FCropItem.Caption := 'Crop selection';
   FCropItem.OnClick := @HandleCropMenuClick;
   FPopupMenu.Items.Add(FCropItem);
+  { A copy at the size shown (the info line's W x H), like Crop; Save /
+    the sort panel then write that size (user, Day 22). }
+  FResizeItem := TMenuItem.Create(FPopupMenu);
+  FResizeItem.Caption := 'Resize to the size shown';
+  FResizeItem.OnClick := @HandleResizeMenuClick;
+  FPopupMenu.Items.Add(FResizeItem);
   Item := TMenuItem.Create(FPopupMenu);
   Item.Caption := 'Save image';
   Item.OnClick := @HandleSaveMenuClick;
@@ -410,6 +462,50 @@ begin
   FSideItem.Caption := 'Side by side with Total Commander';
   FSideItem.OnClick := @HandleSideBySideMenuClick;
   FPopupMenu.Items.Add(FSideItem);
+  { Follow Total Commander: its folder, or also the image under its
+    cursor (MView as its viewer). Tag = the mode. }
+  Item := TMenuItem.Create(FPopupMenu);
+  Item.Caption := 'Follow Total Commander';
+  FPopupMenu.Items.Add(Item);
+  FFollowItems[0] := TMenuItem.Create(FPopupMenu);
+  FFollowItems[0].Caption := 'Off';
+  FFollowItems[1] := TMenuItem.Create(FPopupMenu);
+  FFollowItems[1].Caption := 'Its folder';
+  FFollowItems[2] := TMenuItem.Create(FPopupMenu);
+  FFollowItems[2].Caption := 'Its folder and the image under its cursor';
+  for FollowIndex := 0 to 2 do
+  begin
+    FFollowItems[FollowIndex].Tag := FollowIndex;
+    FFollowItems[FollowIndex].RadioItem := True;
+    FFollowItems[FollowIndex].GroupIndex := 1;
+    FFollowItems[FollowIndex].OnClick := @HandleFollowMenuClick;
+    Item.Add(FFollowItems[FollowIndex]);
+  end;
+  Item := TMenuItem.Create(FPopupMenu);
+  Item.Caption := '-';
+  FPopupMenu.Items.Add(Item);
+  { Looking closer (Phase H): the filter panel also opens at the left
+    edge. Lock filters: they stay for the next images (else the next
+    image starts unfiltered). }
+  { The magnifier (ticked while on). }
+  FMagnifierItem := TMenuItem.Create(FPopupMenu);
+  FMagnifierItem.Caption := 'Magnifier (lens)';
+  FMagnifierItem.OnClick := @HandleMagnifierMenuClick;
+  FPopupMenu.Items.Add(FMagnifierItem);
+  Item := TMenuItem.Create(FPopupMenu);
+  Item.Caption := 'Filters (side menu, left)';
+  Item.OnClick := @HandleFilterPanelMenuClick;
+  FPopupMenu.Items.Add(Item);
+  FLockFiltersItem := TMenuItem.Create(FPopupMenu);
+  FLockFiltersItem.Caption := 'Lock filters';
+  FLockFiltersItem.OnClick := @HandleLockFiltersMenuClick;
+  FPopupMenu.Items.Add(FLockFiltersItem);
+  { The filters into the pixels of a copy, like Crop (enabled while a
+    filter is set). }
+  FApplyFiltersItem := TMenuItem.Create(FPopupMenu);
+  FApplyFiltersItem.Caption := 'Apply filters to a copy';
+  FApplyFiltersItem.OnClick := @HandleApplyFiltersMenuClick;
+  FPopupMenu.Items.Add(FApplyFiltersItem);
   Item := TMenuItem.Create(FPopupMenu);
   Item.Caption := '-';
   FPopupMenu.Items.Add(Item);
@@ -468,6 +564,7 @@ begin
       FEditor.Align := alClient;
       FEditor.OnViewImages := @HandleEditorViewImages;
       FEditor.OnExitRequest := @HandleEditorExit;
+      FEditor.OnSideBySide := @HandleEditorSideBySide;
     end;
     FEditor.Visible := True;
     FEditor.LoadFile(Config.IniFileName);
@@ -582,6 +679,13 @@ begin
   if FSideBySide and FSideHaveBounds then
     BoundsRect := FSideBounds;
   FSideItem := nil;
+  FLockFiltersItem := nil;
+  FApplyFiltersItem := nil;
+  FResizeItem := nil;
+  FMagnifierItem := nil;
+  FFollowItems[0] := nil;
+  FFollowItems[1] := nil;
+  FFollowItems[2] := nil;
   FSideBySide := False;
   FSideWaitUntil := 0;
   FSideAgainAt := 0;
@@ -634,6 +738,152 @@ procedure TMainForm.HandleFormKeyUp(Sender: TObject; var Key: Word; Shift: TShif
 begin
   if Key = VK_ESCAPE then
     FEscHeld := False;
+end;
+
+{ The settings screen's "Total Commander side by side": MView to the left
+  half of its screen, Total Commander to the right, in the last session's
+  folder ([Startup] LastDirectory), else Documents (user, Day 22). Not a
+  toggle: the window can be moved back as usual. }
+procedure TMainForm.HandleEditorSideBySide(Sender: TObject);
+var
+  Config: TConfig;
+  Work, LeftHalf: TRect;
+  Wnd: THandle;
+  Exe, Folder, Configured: string;
+  Mid: Integer;
+begin
+  if FEditor = nil then
+    Exit;
+  Folder := '';
+  Configured := '';
+  Config := TConfig.Create;
+  try
+    try
+      Config.Load;
+      Folder := Config.LastDirectory;
+      Configured := Config.TotalCommander;
+    except
+      { Unreadable ini: Documents, and look for Total Commander. }
+    end;
+  finally
+    Config.Free;
+  end;
+  if (Trim(Folder) = '') or not DirectoryExists(Folder) then
+    Folder := UserDocumentsDirectory;
+  Folder := ExcludeTrailingPathDelimiter(Folder);
+
+  Wnd := FindTotalCommanderWindow;
+  Exe := TotalCommanderExe(Configured, Wnd);
+  if (Wnd = 0) and (Exe = '') then
+  begin
+    FEditor.ShowNote('Total Commander not found: put its path into [Sort] TotalCommander= above, '
+      + 'and Save.');
+    Exit;
+  end;
+
+  Work := Monitor.WorkareaRect;
+  Mid := Work.Left + (Work.Right - Work.Left) div 2;
+  LeftHalf := Rect(Work.Left, Work.Top, Mid, Work.Bottom);
+  FSideRight := Rect(Mid, Work.Top, Work.Right, Work.Bottom);
+  if WindowState <> wsNormal then
+    WindowState := wsNormal;
+  if not PlaceWindow(Handle, LeftHalf) then
+    BoundsRect := LeftHalf;
+
+  if (Exe <> '') and not OpenInTotalCommander(Exe, Folder) then
+  begin
+    FEditor.ShowNote('Total Commander could not be started: ' + Exe);
+    Exit;
+  end;
+
+  if FEditorSideTimer = nil then
+  begin
+    FEditorSideTimer := TTimer.Create(Self);
+    FEditorSideTimer.Interval := 100;
+    FEditorSideTimer.OnTimer := @HandleEditorSideTimer;
+  end;
+  if Wnd <> 0 then
+  begin
+    if PlaceWindow(Wnd, FSideRight) then
+      FEditor.ShowNote('Total Commander side by side, in ' + Folder)
+    else
+      FEditor.ShowNote('Total Commander could not be moved (does it run as administrator?)');
+    { It gets the folder a moment later and may bring itself up where it
+      was: placed once more. }
+    FEditorSideUntil := 0;
+    FEditorSideAgainAt := GetTickCount64 + 600;
+  end
+  else
+  begin
+    FEditorSideUntil := GetTickCount64 + 60000;
+    FEditorSideAgainAt := 0;
+    FEditor.ShowNote('starting Total Commander ...');
+  end;
+  FEditorSideTimer.Enabled := True;
+end;
+
+procedure TMainForm.HandleEditorSideTimer(Sender: TObject);
+var
+  Wnd: THandle;
+begin
+  Wnd := FindTotalCommanderWindow;
+  if (FEditorSideAgainAt > 0) and (GetTickCount64 >= FEditorSideAgainAt) then
+  begin
+    FEditorSideAgainAt := 0;
+    if Wnd <> 0 then
+      PlaceWindow(Wnd, FSideRight);
+  end;
+  if FEditorSideUntil > 0 then
+  begin
+    if (Wnd <> 0) and IsWindowVisible(Wnd) then
+    begin
+      FEditorSideUntil := 0;
+      if PlaceWindow(Wnd, FSideRight) then
+      begin
+        if Assigned(FEditor) then
+          FEditor.ShowNote('Total Commander side by side');
+      end
+      else if Assigned(FEditor) then
+        FEditor.ShowNote('Total Commander could not be moved (does it run as administrator?)');
+      FEditorSideAgainAt := GetTickCount64 + 600;
+    end
+    else if GetTickCount64 > FEditorSideUntil then
+    begin
+      FEditorSideUntil := 0;
+      if Assigned(FEditor) then
+        FEditor.ShowNote('Total Commander''s window did not appear');
+    end;
+  end;
+  if (FEditorSideUntil = 0) and (FEditorSideAgainAt = 0) then
+    FEditorSideTimer.Enabled := False;
+end;
+
+{ Only one instance: a second MView (e.g. started by Total Commander)
+  sent its file or folder (uSingleInstance's listener, UI thread, inside
+  its message). Opened right after: the sender waits for the answer. }
+procedure TMainForm.HandleHandedOver(const APath: string);
+begin
+  FHandedOverPath := APath;
+  Application.QueueAsyncCall(@OpenHandedOver, 0);
+end;
+
+procedure TMainForm.OpenHandedOver(AData: PtrInt);
+var
+  Path: string;
+begin
+  Path := FHandedOverPath;
+  FHandedOverPath := '';
+  if WindowState = wsMinimized then
+    WindowState := wsNormal;
+  Application.BringToFront;
+  if Path = '' then
+    Exit;            { started without a file: just come to the front }
+  if FMView = nil then
+    StartViewerFromEditor(Path)
+  else
+    FMView.OpenMedia(Path);
+  if Assigned(FView) and FView.CanFocus then
+    FView.SetFocus;
 end;
 
 procedure TMainForm.HandleEditorExit(Sender: TObject);
@@ -775,6 +1025,7 @@ procedure TMainForm.HandleCommand(Sender: TObject; ACommand: TCommand;
   const AArgs: TCommandArgs);
 var
   P: TPoint;
+  I: Integer;
 begin
   { Placing windows is the window's business. }
   if ACommand = cmdSideBySide then
@@ -790,7 +1041,7 @@ begin
       if FCursorHidden then
       begin
         FCursorHidden := False;
-        FView.Cursor := crDefault;
+        FView.Cursor := FMView.ViewCursor;
       end;
       P := FView.ClientToScreen(Point(Round(AArgs.X), Round(AArgs.Y)));
       FCropItem.Visible := FMView.EditMode;
@@ -799,6 +1050,16 @@ begin
       FUndoItem.Visible := FUndoItem.Caption <> '';
       FMakeIconItem.Enabled := FMView.CanMakeIcon;
       FSideItem.Checked := FSideBySide;
+      FLockFiltersItem.Checked := FMView.FiltersLocked;
+      FApplyFiltersItem.Enabled := FMView.CanApplyFilters;
+      FResizeItem.Enabled := FMView.CanResizeToShown;
+      FMagnifierItem.Checked := FMView.MagnifierOn;
+      for I := 0 to 2 do
+        FFollowItems[I].Checked := FMView.FollowMode = I;
+      if FMView.ShownSizeText <> '' then
+        FResizeItem.Caption := 'Resize to the size shown (' + FMView.ShownSizeText + ')'
+      else
+        FResizeItem.Caption := 'Resize to the size shown';
       FMenuOpen := True;
       try
         FPopupMenu.PopUp(P.X, P.Y);
@@ -906,6 +1167,37 @@ end;
 procedure TMainForm.HandleSortPanelMenuClick(Sender: TObject);
 begin
   FMView.ShowSortPanel(True);
+end;
+
+procedure TMainForm.HandleFilterPanelMenuClick(Sender: TObject);
+begin
+  FMView.ShowFilterPanel(True);
+end;
+
+procedure TMainForm.HandleLockFiltersMenuClick(Sender: TObject);
+begin
+  FMView.Execute(cmdLockFilters);
+end;
+
+procedure TMainForm.HandleFollowMenuClick(Sender: TObject);
+begin
+  if Sender is TMenuItem then
+    FMView.SetFollowMode(TMenuItem(Sender).Tag);
+end;
+
+procedure TMainForm.HandleMagnifierMenuClick(Sender: TObject);
+begin
+  FMView.Execute(cmdMagnifier);
+end;
+
+procedure TMainForm.HandleResizeMenuClick(Sender: TObject);
+begin
+  FMView.Execute(cmdResizeToShown);
+end;
+
+procedure TMainForm.HandleApplyFiltersMenuClick(Sender: TObject);
+begin
+  FMView.Execute(cmdApplyFilters);
 end;
 
 procedure TMainForm.HandleDeleteMenuClick(Sender: TObject);
@@ -1334,7 +1626,7 @@ begin
   if HideNow then
     FView.Cursor := crNone
   else
-    FView.Cursor := crDefault;
+    FView.Cursor := FMView.ViewCursor;   { a cross while the magnifier follows }
 end;
 
 procedure TMainForm.HandleExitMenuClick(Sender: TObject);

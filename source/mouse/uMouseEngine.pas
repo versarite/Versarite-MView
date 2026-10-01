@@ -408,8 +408,20 @@ begin
         Emit(cmdPreviousDirectory);
       end;
     maParentFolder:  Emit(cmdParentDirectory);
-    maZoomIn:        Emit(cmdZoomAt, AX, AY, ANotches);
-    maZoomOut:       Emit(cmdZoomAt, AX, AY, -ANotches);
+    { With zones on, the mouse sits in a corner zone: zooming there would
+      pull the image towards that corner, so the middle of the view stays
+      put (Day 22, user). Zones off: at the mouse. (Zoom mode, X1, always
+      zooms at the mouse: see Wheel.) }
+    maZoomIn:
+      if FZonesEnabled and (FWidth > 0) and (FHeight > 0) then
+        Emit(cmdZoomAt, FWidth / 2, FHeight / 2, ANotches)
+      else
+        Emit(cmdZoomAt, AX, AY, ANotches);
+    maZoomOut:
+      if FZonesEnabled and (FWidth > 0) and (FHeight > 0) then
+        Emit(cmdZoomAt, FWidth / 2, FHeight / 2, -ANotches)
+      else
+        Emit(cmdZoomAt, AX, AY, -ANotches);
     maFit:           Emit(cmdFitToScreen);
     maOriginalSize:  Emit(cmdOriginalSizeAt, AX, AY);
     maFitOr100:      Emit(cmdToggleFit, AX, AY);
@@ -445,6 +457,14 @@ begin
     maDeleteImage:   Emit(cmdDeleteImage);
     maUndo:          Emit(cmdUndo);
     maSideBySide:    Emit(cmdSideBySide);
+    maFilterPanel:   Emit(cmdFilterPanel);
+    maLockFilters:   Emit(cmdLockFilters);
+    maResetFilters:  Emit(cmdResetFilters);
+    maAutoLevels:    Emit(cmdAutoLevels);
+    maAutoLevelsMode: Emit(cmdAutoLevelsMode);
+    maApplyFilters:  Emit(cmdApplyFilters);
+    maResizeToShown: Emit(cmdResizeToShown);
+    maMagnifier:     Emit(cmdMagnifier);
     { A zoom / rotate mode is the engine's own; everything else (edit
       mode, exit) TMView decides. }
     maBack:

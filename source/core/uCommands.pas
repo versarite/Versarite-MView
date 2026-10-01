@@ -80,8 +80,8 @@ type
     cmdZoomAt,           { X, Y: fixed point on screen; Value: wheel notches (+ = in) }
     cmdPanBy,            { X, Y: movement in screen pixels }
     cmdRotateBy,         { Value: degrees, + = clockwise }
-    cmdToggleFit,        { X, Y: point to keep; fit <-> 100 % }
-    cmdOriginalSizeAt,   { X, Y: point to keep }
+    cmdToggleFit,        { fit <-> 100 % (centred in the window; X, Y not used) }
+    cmdOriginalSizeAt,   { 100 %, centred in the window (X, Y not used) }
     cmdInputMode,        { Value: Ord(TInputMode); only shown on screen }
 
     { Window }
@@ -112,10 +112,19 @@ type
     cmdUndo,             { take back the last copy / move / delete }
     cmdSideBySide,       { MView left, Total Commander right (the form does it) }
 
+    { Looking closer (Phase H) }
+    cmdFilterPanel,      { open / close the filter panel (else the left edge opens it) }
+    cmdLockFilters,      { "Lock filters" on / off: keep them for the next images }
+    cmdResetFilters,     { all filters back to neutral }
+    cmdAutoLevels,       { black / white point from the histogram, once }
+    cmdAutoLevelsMode,   { Auto for every image on / off }
+    cmdApplyFilters,     { a new image with the filters applied (like Crop) }
+    cmdResizeToShown,    { a new image at the size shown on screen (like Crop) }
+
     { Debugging }
     cmdSaveDebug,        { the decoded image and a picture of the window }
 
-    { Planned (spec §9.1), not carried out yet }
+    { Looking closer (Phase H): the magnifier on / off }
     cmdMagnifier
   );
 

@@ -298,8 +298,9 @@ begin
     R.Clear;
     E.Wheel(-120, BRX, BRY, T);
     Idx := R.IndexOf(cmdZoomAt);
-    Check('bottom right, wheel towards you: zoom in at the mouse',
-      (Idx >= 0) and SameValue(R.Args[Idx].Value, 1.0) and (Round(R.Args[Idx].X) = BRX), R.Text);
+    Check('bottom right, wheel towards you: zoom in at the middle of the view (zones on)',
+      (Idx >= 0) and SameValue(R.Args[Idx].Value, 1.0) and (Round(R.Args[Idx].X) = W div 2)
+      and (Round(R.Args[Idx].Y) = H div 2), R.Text);
     R.Clear;
     E.Wheel(40, BRX, BRY, T);
     Idx := R.IndexOf(cmdZoomAt);
@@ -460,6 +461,8 @@ begin
     R.Clear;
     E.Wheel(-120, TLX, TLY, T + 1100);
     Check('  the wheel zooms everywhere', R.Has(cmdZoomAt) and not R.Has(cmdRotateBy), R.Text);
+    Check('  ...at the mouse (zoom mode), not at the middle',
+      R.Has(cmdZoomAt) and (Round(R.Args[R.IndexOf(cmdZoomAt)].X) = TLX), R.Text);
     R.Clear;
     E.KeyDown(VKEY_BROWSER_BACK, False, T + 1200);
     Check('  a Browser Back key right after X1 is its echo: ignored', not R.Has(cmdInputMode), R.Text);

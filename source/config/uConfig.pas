@@ -83,6 +83,7 @@ type
     FLastDirectory   : string;
     FLastFile        : string;
     FStartFullscreen : Boolean;
+    FOnlyOneInstance : Boolean;
 
     { Window }
 
@@ -108,6 +109,7 @@ type
     FSortMode        : TSortMode;
     FRecursive       : Boolean;
     FWrapAround      : Boolean;
+    FClimbUp         : Boolean;
     FWrapScope       : TWrapScope;
     FPlaceholderForBadImages: Boolean;
 
@@ -159,6 +161,18 @@ type
     FDeletedFolder   : string;
     FIconFolder      : string;
     FTotalCommander  : string;
+    FFollowTC        : Integer;
+
+    { Filters (Phase H) }
+
+    FFilterPinned    : Boolean;
+    FAutoFilter      : Boolean;
+
+    { Magnifier (Phase H) }
+
+    FLensMagPercent  : Integer;
+    FLensSize        : Integer;
+    FLensSharpen     : Integer;
 
     procedure LoadDefaults;
     procedure WriteSort(AIni: TCustomIniFile);
@@ -184,6 +198,9 @@ type
     property LastDirectory   : string  read FLastDirectory write FLastDirectory;
     property LastFile        : string  read FLastFile write FLastFile;
     property StartFullscreen : Boolean read FStartFullscreen;
+    { A second MView hands its file or folder to the one running and ends
+      (user, Day 23: opening from Total Commander). }
+    property OnlyOneInstance : Boolean read FOnlyOneInstance;
 
     { Window }
 
@@ -215,6 +232,10 @@ type
     property SortMode        : TSortMode  read FSortMode write FSortMode;
     property Recursive       : Boolean    read FRecursive;
     property WrapAround      : Boolean    read FWrapAround;
+    { Day 22 (user): at the end of the folder tree, browse on one level
+      higher instead of wrapping around (up to one level below the
+      drive). }
+    property ClimbUp         : Boolean    read FClimbUp;
     property WrapScope       : TWrapScope read FWrapScope;
     property PlaceholderForBadImages: Boolean read FPlaceholderForBadImages;
 
@@ -305,6 +326,9 @@ type
     property IconFolder      : string read FIconFolder;
     { TOTALCMD64.EXE for "side by side"; '' = find it (registry). }
     property TotalCommander  : string read FTotalCommander;
+    { Follow Total Commander (Day 23): 0 = no, 1 = its active panel's
+      folder, 2 = and the file under its cursor. }
+    property FollowTotalCommander: Integer read FFollowTC write FFollowTC;
 
     { The folder "Delete" moves to, without trailing delimiter. }
     function DeletedFilesFolder: string;
@@ -313,6 +337,23 @@ type
     { Writes only the [Sort] section (slots, recent folders, pin); other
       keys, and unsaved text in the settings editor, stay as they are. }
     procedure SaveSort;
+
+    { Filters (Phase H, [Filters]) }
+
+    { The filter panel's pin (left edge): stays open. }
+    property FilterPinned    : Boolean read FFilterPinned write FFilterPinned;
+    { Writes only [Filters] Pinned. }
+    procedure SaveFilters;
+    { Auto black / white point for every image from the start (user,
+      Day 22: "incredible ... it could be a default setting"). }
+    property AutoFilter      : Boolean read FAutoFilter;
+
+    { Magnifier (Phase H, [Magnifier]): how it was left (written on
+      exit). Magnification in percent of the screen (300 = 3 x), size =
+      the lens' diameter in px, sharpen 0 off, 1 low, 2 high. }
+    property LensMagPercent  : Integer read FLensMagPercent write FLensMagPercent;
+    property LensSize        : Integer read FLensSize write FLensSize;
+    property LensSharpen     : Integer read FLensSharpen write FLensSharpen;
 
   end;
 
@@ -344,6 +385,7 @@ const
   KEY_LAST_DIRECTORY    = 'LastDirectory';
   KEY_LAST_FILE         = 'LastFile';
   KEY_START_FULLSCREEN  = 'StartFullscreen';
+  KEY_ONLY_ONE_INSTANCE = 'OnlyOneInstance';
   KEY_LEFT              = 'Left';
   KEY_TOP               = 'Top';
   KEY_WIDTH             = 'Width';
@@ -358,6 +400,7 @@ const
   KEY_WRAP_AROUND       = 'WrapAround';
   KEY_WRAP_SCOPE        = 'WrapScope';
   KEY_PLACEHOLDER       = 'PlaceholderForBadImages';
+  KEY_CLIMB_UP          = 'ClimbUp';
   KEY_PRELOAD_COUNT     = 'PreloadCount';
   KEY_PRELOAD_BEHIND    = 'PreloadBehind';
   KEY_DECODE_THREADS    = 'DecodeThreads';
@@ -387,6 +430,14 @@ const
   KEY_DELETED_FOLDER    = 'DeletedFolder';
   KEY_ICON_FOLDER       = 'IconFolder';
   KEY_TOTAL_COMMANDER   = 'TotalCommander';
+  KEY_FOLLOW_TC         = 'FollowTotalCommander';
+  SEC_FILTERS           = 'Filters';
+  KEY_FILTER_PINNED     = 'Pinned';
+  KEY_AUTO_FILTER       = 'AutoFilter';
+  SEC_MAGNIFIER         = 'Magnifier';
+  KEY_LENS_MAG          = 'MagnificationPercent';
+  KEY_LENS_SIZE         = 'Size';
+  KEY_LENS_SHARPEN      = 'Sharpen';
 
 constructor TConfig.Create;
 begin
@@ -408,6 +459,7 @@ begin
   FLastDirectory   := '';
   FLastFile        := '';
   FStartFullscreen := False;
+  FOnlyOneInstance := True;
 
   FLeft := 0;
   FTop := 0;
@@ -425,6 +477,7 @@ begin
   FSortMode        := smDateDescending;
   FRecursive       := True;
   FWrapAround      := True;
+  FClimbUp         := False;
   FWrapScope       := wsTree;
   FPlaceholderForBadImages := True;
 
@@ -461,6 +514,12 @@ begin
   FDeletedFolder   := '';
   FIconFolder      := '';
   FTotalCommander  := '';
+  FFollowTC        := 1;
+  FFilterPinned    := False;
+  FAutoFilter      := True;
+  FLensMagPercent  := 300;
+  FLensSize        := 300;
+  FLensSharpen     := 0;      { user: off by default }
   { The slots are not defaults: an empty list. }
   FSortFolders.Clear;
 end;
@@ -484,6 +543,7 @@ begin
     FLastDirectory   := Ini.ReadString(SEC_STARTUP, KEY_LAST_DIRECTORY, FLastDirectory);
     FLastFile        := Ini.ReadString(SEC_STARTUP, KEY_LAST_FILE, FLastFile);
     FStartFullscreen := Ini.ReadBool(SEC_STARTUP, KEY_START_FULLSCREEN, FStartFullscreen);
+    FOnlyOneInstance := Ini.ReadBool(SEC_STARTUP, KEY_ONLY_ONE_INSTANCE, FOnlyOneInstance);
 
     FLeft   := Ini.ReadInteger(SEC_WINDOW, KEY_LEFT, FLeft);
     FTop    := Ini.ReadInteger(SEC_WINDOW, KEY_TOP, FTop);
@@ -498,6 +558,7 @@ begin
     FSortMode   := StringToSortMode(Ini.ReadString(SEC_NAVIGATION, KEY_SORT_MODE, ''), FSortMode);
     FRecursive  := Ini.ReadBool(SEC_NAVIGATION, KEY_RECURSIVE, FRecursive);
     FWrapAround := Ini.ReadBool(SEC_NAVIGATION, KEY_WRAP_AROUND, FWrapAround);
+    FClimbUp    := Ini.ReadBool(SEC_NAVIGATION, KEY_CLIMB_UP, FClimbUp);
     FWrapScope  := StringToWrapScope(Ini.ReadString(SEC_NAVIGATION, KEY_WRAP_SCOPE, ''), FWrapScope);
     FPlaceholderForBadImages := Ini.ReadBool(SEC_NAVIGATION, KEY_PLACEHOLDER, FPlaceholderForBadImages);
 
@@ -533,7 +594,23 @@ begin
     FDeletedFolder   := Trim(Ini.ReadString(SortSection, KEY_DELETED_FOLDER, FDeletedFolder));
     FIconFolder      := Trim(Ini.ReadString(SortSection, KEY_ICON_FOLDER, FIconFolder));
     FTotalCommander  := Trim(Ini.ReadString(SortSection, KEY_TOTAL_COMMANDER, FTotalCommander));
+    FFollowTC        := Ini.ReadInteger(SortSection, KEY_FOLLOW_TC, FFollowTC);
+    if (FFollowTC < 0) or (FFollowTC > 2) then
+      FFollowTC := 1;
     FSortFolders.LoadFromIni(Ini);
+
+    FFilterPinned    := Ini.ReadBool(SEC_FILTERS, KEY_FILTER_PINNED, FFilterPinned);
+    FAutoFilter      := Ini.ReadBool(SEC_FILTERS, KEY_AUTO_FILTER, FAutoFilter);
+
+    FLensMagPercent  := Ini.ReadInteger(SEC_MAGNIFIER, KEY_LENS_MAG, FLensMagPercent);
+    FLensSize        := Ini.ReadInteger(SEC_MAGNIFIER, KEY_LENS_SIZE, FLensSize);
+    FLensSharpen     := Ini.ReadInteger(SEC_MAGNIFIER, KEY_LENS_SHARPEN, FLensSharpen);
+    if (FLensMagPercent < 125) or (FLensMagPercent > 3200) then
+      FLensMagPercent := 300;
+    if (FLensSize < 80) or (FLensSize > 4000) then
+      FLensSize := 300;
+    if (FLensSharpen < 0) or (FLensSharpen > 2) then
+      FLensSharpen := 0;
   finally
     Ini.Free;
   end;
@@ -551,6 +628,7 @@ begin
     Ini.WriteString(SEC_STARTUP, KEY_LAST_DIRECTORY, FLastDirectory);
     Ini.WriteString(SEC_STARTUP, KEY_LAST_FILE, FLastFile);
     Ini.WriteBool(SEC_STARTUP, KEY_START_FULLSCREEN, FStartFullscreen);
+    Ini.WriteBool(SEC_STARTUP, KEY_ONLY_ONE_INSTANCE, FOnlyOneInstance);
 
     if FWidth > 0 then
     begin
@@ -568,6 +646,7 @@ begin
     Ini.WriteString(SEC_NAVIGATION, KEY_SORT_MODE, SortModeToString(FSortMode));
     Ini.WriteBool(SEC_NAVIGATION, KEY_RECURSIVE, FRecursive);
     Ini.WriteBool(SEC_NAVIGATION, KEY_WRAP_AROUND, FWrapAround);
+    Ini.WriteBool(SEC_NAVIGATION, KEY_CLIMB_UP, FClimbUp);
     Ini.WriteString(SEC_NAVIGATION, KEY_WRAP_SCOPE, WrapScopeToString(FWrapScope));
     Ini.WriteBool(SEC_NAVIGATION, KEY_PLACEHOLDER, FPlaceholderForBadImages);
 
@@ -598,6 +677,12 @@ begin
     Ini.WriteString(SEC_DEBUG, KEY_SAVE_IMAGE_DIR, FSaveImageDir);
 
     WriteSort(Ini);
+    Ini.WriteBool(SEC_FILTERS, KEY_FILTER_PINNED, FFilterPinned);
+    Ini.WriteBool(SEC_FILTERS, KEY_AUTO_FILTER, FAutoFilter);
+
+    Ini.WriteInteger(SEC_MAGNIFIER, KEY_LENS_MAG, FLensMagPercent);
+    Ini.WriteInteger(SEC_MAGNIFIER, KEY_LENS_SIZE, FLensSize);
+    Ini.WriteInteger(SEC_MAGNIFIER, KEY_LENS_SHARPEN, FLensSharpen);
   finally
     Ini.Free;
   end;
@@ -611,6 +696,7 @@ begin
   AIni.WriteString(SortSection, KEY_DELETED_FOLDER, FDeletedFolder);
   AIni.WriteString(SortSection, KEY_ICON_FOLDER, FIconFolder);
   AIni.WriteString(SortSection, KEY_TOTAL_COMMANDER, FTotalCommander);
+  AIni.WriteInteger(SortSection, KEY_FOLLOW_TC, FFollowTC);
   FSortFolders.SaveToIni(AIni);
 end;
 
@@ -627,6 +713,22 @@ begin
     end;
   except
     { A read-only folder: the slots hold for this session only. }
+  end;
+end;
+
+procedure TConfig.SaveFilters;
+var
+  Ini: TIniFile;
+begin
+  try
+    Ini := TIniFile.Create(FIniFileName);
+    try
+      Ini.WriteBool(SEC_FILTERS, KEY_FILTER_PINNED, FFilterPinned);
+    finally
+      Ini.Free;
+    end;
+  except
+    { A read-only folder: the pin holds for this session only. }
   end;
 end;
 
@@ -654,7 +756,7 @@ type
   end;
 
 const
-  KeyHelpTable: array[0..37] of TKeyHelp = (
+  KeyHelpTable: array[0..38] of TKeyHelp = (
     (Section: SEC_STARTUP; Key: KEY_OPEN_LAST_SESSION;
      Text: 'Not used any more: started without a file or folder, MView shows this editor; "View images" opens the last session.'),
     (Section: SEC_STARTUP; Key: KEY_LAST_DIRECTORY;
@@ -691,6 +793,12 @@ const
            '  Dir  the first image of the same folder: you stay in the folder;' + LineEnding +
            '       only the gestures, the tilt wheel and the Left / Right keys change folders' + LineEnding +
            '  Tree  the first image of the next folder with images (default)'),
+    (Section: SEC_NAVIGATION; Key: KEY_CLIMB_UP;
+     Text: '1 = at the end of the folder tree (next / previous folder, or next / previous image with' + LineEnding +
+           '    WrapScope=Tree) MView browses on one level higher, into the neighbouring folders,' + LineEnding +
+           '    instead of starting again at the beginning; again and again, up to one level below' + LineEnding +
+           '    the drive. Also leaves a folder opened from the sort panel. Needs Recursive=1.' + LineEnding +
+           '    0 = stay in the tree (default).'),
     (Section: SEC_NAVIGATION; Key: KEY_PLACEHOLDER;
      Text: '1 = show a message for images that can''t be read; 0 = skip them.'),
     (Section: SEC_PERFORMANCE; Key: KEY_PRELOAD_COUNT;
@@ -753,6 +861,30 @@ begin
   if SameText(ASection, SEC_DEBUG) and SameText(AKey, KEY_SAVE_IMAGE_DIR) then
     Exit('Folder for "Save image" (context menu). Empty: your Documents folder, written here at the first save. '
       + 'If the folder can''t be used (wrong path, missing drive), the image goes to your Documents folder.');
+  if SameText(ASection, SEC_FILTERS) and SameText(AKey, KEY_FILTER_PINNED) then
+    Exit('1 = the filter panel (left edge) stays open (its pin). Written by MView. '
+      + 'It opens when the mouse rests at the left edge ([Sort] EdgeDelayMs and EdgeWidth), '
+      + 'or with the menu entry "Filters".');
+  if SameText(ASection, SEC_STARTUP) and SameText(AKey, KEY_ONLY_ONE_INSTANCE) then
+    Exit('1 = only one MView (default): an image or folder opened while MView runs (e.g. from '
+      + 'Total Commander) opens in the running MView, which comes to the front. 0 = a new MView '
+      + 'each time. Read when MView starts.');
+  if SameText(ASection, SEC_MAGNIFIER) then
+  begin
+    if SameText(AKey, KEY_LENS_MAG) then
+      Exit('The magnifier''s magnification, in percent of what the screen shows (300 = 3 x; '
+        + '125 .. 3200). Left drag sideways changes it; written by MView on exit.');
+    if SameText(AKey, KEY_LENS_SIZE) then
+      Exit('The magnifier''s diameter in pixels (80 .. 4000). Left drag up / down changes it; '
+        + 'written by MView on exit.');
+    if SameText(AKey, KEY_LENS_SHARPEN) then
+      Exit('The magnifier''s sharpening: 0 off (default), 1 low, 2 high. The wheel changes it; '
+        + 'written by MView on exit.');
+  end;
+  if SameText(ASection, SEC_FILTERS) and SameText(AKey, KEY_AUTO_FILTER) then
+    Exit('1 = Auto black / white point for every image from the start (default): each image is '
+      + 'stretched to its own range, "[auto]" in the info line. 0 = off at the start. '
+      + 'Double-click Auto on the filter panel switches it for the session.');
   if SameText(ASection, SortSection) then
   begin
     if SameText(AKey, KEY_SORT_EDGE_DELAY) then
@@ -769,6 +901,10 @@ begin
         + 'Empty = "MView deleted files" in your Documents folder.');
     if SameText(AKey, KEY_ICON_FOLDER) then
       Exit('Folder with .ico / .png icons for the sort panel. Empty = "icons" next to MView.exe.');
+    if SameText(AKey, KEY_FOLLOW_TC) then
+      Exit('Follow Total Commander: 0 = no; 1 = when its active panel changes folder, MView opens '
+        + 'that folder (default); 2 = also the image under its cursor (MView as Total Commander''s '
+        + 'viewer). Also in the right-click menu.');
     if SameText(AKey, KEY_TOTAL_COMMANDER) then
       Exit('Total Commander (TOTALCMD64.EXE) for "Side by side". Empty = found by MView.');
     if Pos('Slot', AKey) = 1 then

@@ -137,6 +137,8 @@ type
     FRecursive: Boolean;
     FWrapAround: Boolean;
     FWrapScope: TWrapScope;
+    FClimbUp: Boolean;           { Day 22: at the end of the tree, one level up instead of wrapping }
+    FClimbWanted: Boolean;       { the last step ran into the end with ClimbUp: the owner climbs }
     FRootDirectory: string;
     FTreeReady: Boolean;
     FListings: TFPList;          { TDirectoryImages of other folders }
@@ -152,6 +154,7 @@ type
     procedure ScanImages(const ADirectory: string);
     function SeekDirectory(ADirection: Integer; ALandOnLast: Boolean): Boolean;
     function TreeImages(const ADirectory: string): TDirectoryImages;
+    function WrapsAtEnd: Boolean;
   public
     { The navigation root for a file in ADirectory (see "Rules"). }
     class function ChooseRoot(const ADirectory: string; ARecursive: Boolean): string;
@@ -229,6 +232,16 @@ type
     property Recursive: Boolean read FRecursive write FRecursive;
     property WrapAround: Boolean read FWrapAround write FWrapAround;
     property WrapScope: TWrapScope read FWrapScope write FWrapScope;
+    { Day 22 (user, [Navigation] ClimbUp): at the end of the tree the
+      step doesn't wrap around; it fails with ClimbWanted, and the owner
+      opens the root's parent (one level up) and steps on there. Only
+      with the tree known, and while CanClimbUp. }
+    property ClimbUp: Boolean read FClimbUp write FClimbUp;
+    property ClimbWanted: Boolean read FClimbWanted;
+    { The root has a parent that isn't a drive (or a network share)
+      itself: MView doesn't climb to a whole drive. Only with Recursive
+      (otherwise the parent's tree would not hold the neighbours). }
+    function CanClimbUp: Boolean;
     { False: never read a folder (see "No disk access"). }
     property ReadsDisk: Boolean read FReadsDisk write FReadsDisk;
   end;
@@ -362,7 +375,7 @@ begin
     Pos := StartPos + ADirection * Step;
     if (Pos < 0) or (Pos >= Total) then
     begin
-      if not FWrapAround then
+      if not WrapsAtEnd then
         Break;
       Pos := ((Pos mod Total) + Total) mod Total;
     end;
@@ -417,7 +430,7 @@ begin
         Next := NeighborWithImages(List.Directory, ADirection);
         if Next <> nil then
           List := Next
-        else if not (FTreeReady and FWrapAround and (ListCount > 1)) then
+        else if not (FTreeReady and WrapsAtEnd and (ListCount > 1)) then
           Break
         else if List <> FImages then
           Break;   { can't happen in practice; don't risk a freed list }
@@ -817,8 +830,26 @@ begin
   Result := FImages.Count;
 end;
 
+function TNavigator.CanClimbUp: Boolean;
+var
+  Root, Parent: string;
+begin
+  Root := ExcludeTrailingPathDelimiter(FRootDirectory);
+  Parent := ExcludeTrailingPathDelimiter(ExtractFileDir(Root));
+  Result := FRecursive and (Root <> '') and (Parent <> '') and not SameText(Parent, Root)
+    and not SameText(Parent, ExcludeTrailingPathDelimiter(ExtractFileDrive(Parent)));
+end;
+
+{ Does a walk that runs past the end of the tree go on at the other
+  end? Not when it may climb instead. }
+function TNavigator.WrapsAtEnd: Boolean;
+begin
+  Result := FWrapAround and not (FClimbUp and FTreeReady and CanClimbUp);
+end;
+
 function TNavigator.NextImage: Boolean;
 begin
+  FClimbWanted := False;
   if not HasCurrentImage then
     Exit(SeekDirectory(1, False));
 
@@ -840,8 +871,10 @@ begin
   Result := SeekDirectory(1, False);
 
   { The only folder with images: wrap inside it. (Not while the tree
-    is still being scanned: other folders may have images.) }
-  if (not Result) and FTreeReady and FWrapAround and (FImages.Count > 1) then
+    is still being scanned: other folders may have images; not if the
+    owner climbs instead.) }
+  if (not Result) and (not FClimbWanted) and FTreeReady and FWrapAround
+    and (FImages.Count > 1) then
   begin
     FCurrentIndex := 0;
     Result := True;
@@ -850,6 +883,7 @@ end;
 
 function TNavigator.PreviousImage: Boolean;
 begin
+  FClimbWanted := False;
   if not HasCurrentImage then
     Exit(SeekDirectory(-1, True));
 
@@ -870,7 +904,8 @@ begin
 
   Result := SeekDirectory(-1, True);
 
-  if (not Result) and FTreeReady and FWrapAround and (FImages.Count > 1) then
+  if (not Result) and (not FClimbWanted) and FTreeReady and FWrapAround
+    and (FImages.Count > 1) then
   begin
     FCurrentIndex := FImages.Count - 1;
     Result := True;
@@ -901,6 +936,7 @@ var
   OriginalIndex, StartPos, Steps, Step, Pos, Total: Integer;
 begin
   Result := False;
+  FClimbWanted := False;
   Total := FTree.Count;
   if Total = 0 then
     Exit;
@@ -926,7 +962,7 @@ begin
     Pos := StartPos + ADirection * Step;
     if (Pos < 0) or (Pos >= Total) then
     begin
-      if not FWrapAround then
+      if not WrapsAtEnd then
         Break;
       Pos := ((Pos mod Total) + Total) mod Total;
     end;
@@ -942,10 +978,12 @@ begin
     end;
   end;
 
-  { Nothing found: put everything back. }
+  { Nothing found: put everything back. With ClimbUp: the end of the
+    tree was reached, the owner goes one level up. }
   if FImages.Directory <> StartDirectory then
     ScanImages(StartDirectory);
   FCurrentIndex := OriginalIndex;
+  FClimbWanted := FClimbUp and FTreeReady and CanClimbUp;
 end;
 
 end.
