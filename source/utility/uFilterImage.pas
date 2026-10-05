@@ -23,6 +23,8 @@ unit uFilterImage;
   - SharpenBitmap: an unsharp mask for the magnifier (CPU renderer).
   - ApplyFiltersToBitmap: in place, with the per-pixel work prepared
     once (PrepareFilters); AMirror: also mirror it (a filtered copy).
+  - RotatedBitmap (Day 24): a turned copy (quarter turns exact, other
+    angles bilinear on a larger canvas).
   - ImageHistogram: the luma (0.299 R + 0.587 G + 0.114 B, in integers)
     of the pixels in a rectangle; large areas are sampled on a regular
     grid (about AMaxSamples pixels), so a 100 MP image costs a few ms.
@@ -67,6 +69,13 @@ procedure SharpenBitmap(ABitmap: TBGRACustomBitmap; AAmount: Single);
   pixels counted (0: nothing). }
 function ImageHistogram(ABitmap: TBGRACustomBitmap; const ARect: TRect; out AHist: THistogram;
   AMaxSamples: Integer = 1000000): Int64;
+
+{ ABitmap turned by ADegrees clockwise (as on screen), as a new bitmap
+  (Day 24: "Apply filters to a copy" takes the rotation). Quarter turns
+  exactly; other angles bilinear, on a canvas large enough for the
+  whole image, the corners in ABackground. }
+function RotatedBitmap(ABitmap: TBGRABitmap; ADegrees: Double;
+  ABackground: TBGRAPixel): TBGRABitmap;
 
 implementation
 
@@ -156,6 +165,101 @@ begin
       end;
   end;
   ABitmap.InvalidateBitmap;
+end;
+
+function RotatedBitmap(ABitmap: TBGRABitmap; ADegrees: Double;
+  ABackground: TBGRAPixel): TBGRABitmap;
+var
+  A, Rad, C, S, CX, CY, NCX, NCY, DX, DY, SX, SY, FX, FY: Double;
+  W, H, NW, NH, X, Y, X0, Y0, Turns: Integer;
+  P: PBGRAPixel;
+  Rows: array of PBGRAPixel;
+  P00, P10, P01, P11: TBGRAPixel;
+
+  function At(AX, AY: Integer): TBGRAPixel;
+  begin
+    if (AX < 0) or (AY < 0) or (AX >= W) or (AY >= H) then
+      Result := ABackground
+    else
+      Result := Rows[AY][AX];
+  end;
+
+  function Mix(V00, V10, V01, V11: Byte): Byte;
+  var
+    V: Double;
+  begin
+    V := (V00 * (1 - FX) + V10 * FX) * (1 - FY) + (V01 * (1 - FX) + V11 * FX) * FY;
+    Result := EnsureRange(Round(V), 0, 255);
+  end;
+
+begin
+  Result := nil;
+  if ABitmap = nil then
+    Exit;
+  A := ADegrees - 360.0 * Floor(ADegrees / 360.0);
+  { Quarter turns: exact, no resampling. }
+  Turns := Round(A / 90.0);
+  if Abs(A - Turns * 90.0) < 0.01 then
+  begin
+    case Turns mod 4 of
+      1: Result := ABitmap.RotateCW as TBGRABitmap;
+      2: begin
+           Result := ABitmap.Duplicate as TBGRABitmap;
+           Result.HorizontalFlip;
+           Result.VerticalFlip;
+         end;
+      3: Result := ABitmap.RotateCCW as TBGRABitmap;
+    else
+      Result := ABitmap.Duplicate as TBGRABitmap;
+    end;
+    Exit;
+  end;
+
+  W := ABitmap.Width;
+  H := ABitmap.Height;
+  Rad := DegToRad(A);
+  C := Cos(Rad);
+  S := Sin(Rad);
+  NW := Max(1, Ceil(Abs(W * C) + Abs(H * S) - 1e-6));
+  NH := Max(1, Ceil(Abs(W * S) + Abs(H * C) - 1e-6));
+  Result := TBGRABitmap.Create(NW, NH, ABackground);
+  SetLength(Rows, H);
+  for Y := 0 to H - 1 do
+    Rows[Y] := ABitmap.ScanLine[Y];
+  CX := W / 2;
+  CY := H / 2;
+  NCX := NW / 2;
+  NCY := NH / 2;
+  for Y := 0 to NH - 1 do
+  begin
+    P := Result.ScanLine[Y];
+    DY := Y + 0.5 - NCY;
+    for X := 0 to NW - 1 do
+    begin
+      DX := X + 0.5 - NCX;
+      { Back into the source: the inverse of a clockwise turn (screen y
+        points down), pixel centres at +0.5. }
+      SX := DX * C + DY * S + CX - 0.5;
+      SY := -DX * S + DY * C + CY - 0.5;
+      if (SX > -1) and (SY > -1) and (SX < W) and (SY < H) then
+      begin
+        X0 := Floor(SX);
+        Y0 := Floor(SY);
+        FX := SX - X0;
+        FY := SY - Y0;
+        P00 := At(X0, Y0);
+        P10 := At(X0 + 1, Y0);
+        P01 := At(X0, Y0 + 1);
+        P11 := At(X0 + 1, Y0 + 1);
+        P^.red := Mix(P00.red, P10.red, P01.red, P11.red);
+        P^.green := Mix(P00.green, P10.green, P01.green, P11.green);
+        P^.blue := Mix(P00.blue, P10.blue, P01.blue, P11.blue);
+        P^.alpha := Mix(P00.alpha, P10.alpha, P01.alpha, P11.alpha);
+      end;
+      Inc(P);
+    end;
+  end;
+  Result.InvalidateBitmap;
 end;
 
 function ImageHistogram(ABitmap: TBGRACustomBitmap; const ARect: TRect; out AHist: THistogram;

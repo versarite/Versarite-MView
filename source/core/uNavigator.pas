@@ -159,6 +159,10 @@ type
     { The navigation root for a file in ADirectory (see "Rules"). }
     class function ChooseRoot(const ADirectory: string; ARecursive: Boolean): string;
     class function IsInside(const ADirectory, ARoot: string): Boolean;
+    { ExpandFileName, but a bare drive ("C:", e.g. a sort folder "C:\"
+      kept without its backslash) is that drive's root, not the current
+      folder on that drive (Day 24, user's bug). }
+    class function FullPath(const APath: string): string;
 
     constructor Create;
     destructor Destroy; override;
@@ -210,6 +214,8 @@ type
     function HasCurrentImage: Boolean;
     function CurrentFileName: string;
     function ImageCount: Integer;
+    { Videos in the current folder (only counted, never shown). }
+    function VideoCount: Integer;
 
     { Each returns True if the current image changed. }
     function NextImage: Boolean;
@@ -497,6 +503,16 @@ begin
   Result := Parent;
 end;
 
+class function TNavigator.FullPath(const APath: string): string;
+var
+  P: string;
+begin
+  P := Trim(APath);
+  if (Length(P) = 2) and (P[2] = ':') then
+    P := P + PathDelim;
+  Result := ExpandFileName(P);
+end;
+
 class function TNavigator.IsInside(const ADirectory, ARoot: string): Boolean;
 var
   RootPrefix: string;
@@ -514,7 +530,7 @@ var
   OpenedFile: Boolean;
 begin
   ClearListings;
-  Path := ExpandFileName(AFileOrDirectory);
+  Path := FullPath(AFileOrDirectory);
   TargetFile := '';
   OpenedFile := not DirectoryExists(Path);
 
@@ -526,7 +542,7 @@ begin
     { Resume on a given file, if it lies inside this folder's tree. }
     if ASelectFile <> '' then
     begin
-      SelectPath := ExpandFileName(ASelectFile);
+      SelectPath := FullPath(ASelectFile);
       SelectDirectory := ExcludeTrailingPathDelimiter(ExtractFileDir(SelectPath));
       if FileExists(SelectPath) and IsInside(SelectDirectory, FRootDirectory) then
       begin
@@ -828,6 +844,11 @@ end;
 function TNavigator.ImageCount: Integer;
 begin
   Result := FImages.Count;
+end;
+
+function TNavigator.VideoCount: Integer;
+begin
+  Result := FImages.VideoCount;
 end;
 
 function TNavigator.CanClimbUp: Boolean;

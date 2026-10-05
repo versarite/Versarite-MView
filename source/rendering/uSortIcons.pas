@@ -40,6 +40,8 @@ unit uSortIcons;
     that size (uIconFile.ChooseIconEntry), PNG entries and .png files
     through BGRABitmap, old-style entries through DecodeIconDib; scaled
     with a fine filter. nil if the file wasn't found or can't be read.
+  - NativeSize(path): the largest picture's size, for the large preview
+    beside the panel (Day 24).
 
   Does NOT
   --------
@@ -133,6 +135,9 @@ type
     { The icon file APath (full path) as a ASize x ASize picture; nil if
       it wasn't found or can't be read. Kept: don't free it. }
     function Bitmap(const APath: string; ASize: Integer): TBGRABitmap;
+    { The size of the largest picture in the icon file APath (its longer
+      side, px; for a .png the picture's); 0 if unknown. }
+    function NativeSize(const APath: string): Integer;
     { APath was found (and read) by the last load. }
     function Has(const APath: string): Boolean;
     { AFolder was not found by the last load. }
@@ -493,6 +498,28 @@ end;
 function TSortIcons.Has(const APath: string): Boolean;
 begin
   Result := FFiles.IndexOf(APath) >= 0;
+end;
+
+function TSortIcons.NativeSize(const APath: string): Integer;
+var
+  Idx, I, W, H: Integer;
+  Data: TIconData;
+  Entries: TIconEntries;
+begin
+  Result := 0;
+  Idx := FFiles.IndexOf(APath);
+  if Idx < 0 then
+    Exit;
+  Data := TIconData(FFiles.Objects[Idx]);
+  if Data.Failed then
+    Exit;
+  if ReadIconDirectory(Data.Bytes, Entries) then
+  begin
+    for I := 0 to High(Entries) do
+      Result := Max(Result, Max(Entries[I].Width, Entries[I].Height));
+  end
+  else if PngImageSize(Data.Bytes, 0, W, H) then
+    Result := Max(W, H);
 end;
 
 function TSortIcons.FolderMissing(const AFolder: string): Boolean;

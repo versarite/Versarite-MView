@@ -1,6 +1,6 @@
 ---
-title: "MView — Architecture"
-subtitle: "Units, dependencies and how they work together (as of Day 19, 2026-09-28)"
+title: "Versarite MView 1.0 — Architecture"
+subtitle: "Units, dependencies and how they work together (release 1.0, Day 24, 2026-10-05)"
 ---
 
 # How to read this
@@ -28,7 +28,10 @@ first thing to read before changing a unit; this document is the map that ties t
 Arrows point from a unit to the units it uses. The layers (L0 at the bottom to L6 at the top) are the
 dependency depth: a unit only uses units in lower layers, so there are **no cycles**. uMainForm is the
 only unit that sees everything; the imaging units never see the window, and the utility units see
-nothing of MView at all.
+nothing of MView at all. Layers with many units are drawn as two staggered rows. Units marked NEW
+came after Day 19: sorting (uSortPanel, uSortIcons, uSortFolders, uFileMover, uIconFile), looking
+closer (uFilters, uFilterImage, uFilterPanel), Total Commander (uTCFollow, uTotalCommander) and the
+single instance (uSingleInstance).
 
 # Picture 2 — at run time
 
@@ -40,6 +43,12 @@ the decode workers and the save thread never call into the UI; they hand their r
 left in the queue (the delivery safety net in uMView). The I/O gate lets the image on screen read
 the disk first; the memory guard refuses images that would not fit; the watchdog ends MView if a
 shutdown hangs.
+
+Since Day 19 (NEW in the picture): the sort and filter panels and the magnifier lens live on the UI
+thread and are drawn by the renderers on top of the image; copies and moves run on the file mover
+thread, icon files are read on a loader thread of their own; the Total Commander follower asks
+Total Commander five times a second through window messages; a second MView hands its path to the
+running one through a hidden message window and ends.
 
 # The units in one line each
 
@@ -71,10 +80,14 @@ shutdown hangs.
 | rendering | uRenderer | View state (fit, zoom, pan, rotation, overlays) and the CPU renderer. | UI |
 | rendering | uGLRenderer | The GPU renderer: textures, tiles, mipmaps, overlay text. | UI |
 | rendering | uGLMediaView | The OpenGL drawing surface. | UI |
+| rendering | uSortPanel | The sort panel at the right edge: buttons, pin, flash, icon preview; drawn as one picture. | UI |
+| rendering | uSortIcons | The slot icons: files read on a loader thread, pictures scaled on the UI thread. | UI + loader |
+| rendering | uFilterPanel | The filter panel at the left edge: histogram, rows, Auto, Reset; drawn as one picture. | UI |
 | mouse | uMouseEngine | Mouse and key input → commands, following the profile (zones, clicks, gestures). | UI |
 | mouse | uMouseProfile | Default.mouse: zones, events, commands; read, check, save. | UI |
 | mouse | uInputHandler | **Retired** (replaced by uMouseEngine + uMouseProfile); still compiled, used by nothing. | — |
 | config | uConfig | MView.ini as typed settings. | UI |
+| config | uSortFolders | The sort panel's folders (slots: folder, name, colour, icon) and recent folders, in MView.ini. | UI |
 | config | uIniEditor | The settings screen: MView.ini in a text editor, with help per key. | UI |
 | config | uMousePage | The "Mouse & keys" page, with "Try it here". | UI |
 | utility | uIOGate | Display reads go first; the scanner and preloads wait. | workers, scanner |
@@ -83,6 +96,13 @@ shutdown hangs.
 | utility | uStopwatch | Millisecond clock and process age for the timing logs. | any |
 | utility | uImageSaver | Saves an image as PNG on a background thread. | save thread |
 | utility | uNaturalSort | File name ordering as in Explorer (numbers by value). | any |
+| utility | uFileMover | Copy / move / delete (into a folder) / undo on a thread of its own; never overwrites; sorting.log. | mover thread |
+| utility | uIconFile | .ico files: read the directory and pictures, write multi-size icons. | any |
+| utility | uFilters | The display filters' maths: tone table, colour, Auto levels, names. | any |
+| utility | uFilterImage | Filters, sharpening and turns applied to a bitmap; histograms. | UI |
+| utility | uTCFollow | Follows Total Commander: asks for its folder and the file under its cursor. | UI |
+| utility | uTotalCommander | Finds and starts Total Commander, side by side. | UI |
+| utility | uSingleInstance | Only one MView: a second one hands its path over through a message window. | UI |
 
 # Rules the structure follows
 
@@ -93,7 +113,10 @@ shutdown hangs.
 - **Threads never touch the UI.** Results come back with TThread.Queue, never Synchronize.
 - **Decoding knows nothing about the window**, and rendering knows nothing about files.
 - **Shared data is locked in exactly four places:** the job queue, the image cache, the directory
-  scanner and the I/O gate.
+  scanner and the I/O gate — plus, since Day 21, the file mover's and the icon loader's own
+  request queues.
+- **Panels are pictures.** The sort and filter panels draw themselves into a bitmap; the renderers
+  only put that bitmap on top (a texture on the GPU), so both renderers show them the same way.
 
 # Housekeeping noticed while documenting (not changed)
 
@@ -104,3 +127,11 @@ shutdown hangs.
   are never set. To be decided when those features come up.
 - MView.lpr's uses list does not name the newer units (uAnimation, uGifDecoder, uMouseEngine,
   uMouseProfile, uMousePage); they are compiled because other units use them. Harmless.
+
+# What comes next
+
+Release 1.0 freezes the viewer's feature set. The **microscopy edition** (measuring, calibration,
+scale bar, instrument metadata, movies, image editing, Photoshop .8bf filters, Fiji through Fiji
+itself) is a second program built from this same source tree: its own project file, its units in
+`source\microscopy\`, on top of the units in these pictures. The core gets two hooks for it: a
+metadata-reader layer and a measurement overlay in the renderers.

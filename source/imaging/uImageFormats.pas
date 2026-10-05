@@ -24,6 +24,8 @@ unit uImageFormats;
     .jpe .png .bmp .gif.
   - IsSupportedImageFile: True if a file name ends in one of them
     (case does not matter).
+  - IsVideoFile (Day 24): a video, by its extension only. MView never
+    opens one; folders count them for the info line ("3 videos").
 
   Does NOT
   --------
@@ -68,7 +70,14 @@ const
     '.gif'
   );
 
+  { Videos (never opened, only counted; user, Day 24). }
+  VideoExtensions: array[0..14] of string = (
+    '.mp4', '.m4v', '.mov', '.avi', '.mkv', '.webm', '.wmv', '.mpg',
+    '.mpeg', '.flv', '.3gp', '.mts', '.m2ts', '.vob', '.ser'
+  );
+
 function IsSupportedImageFile(const AFileName: string): Boolean;
+function IsVideoFile(const AFileName: string): Boolean;
 
 implementation
 
@@ -80,6 +89,18 @@ begin
   Ext := LowerCase(ExtractFileExt(AFileName));
   for I := Low(SupportedImageExtensions) to High(SupportedImageExtensions) do
     if Ext = SupportedImageExtensions[I] then
+      Exit(True);
+  Result := False;
+end;
+
+function IsVideoFile(const AFileName: string): Boolean;
+var
+  Ext: string;
+  I: Integer;
+begin
+  Ext := LowerCase(ExtractFileExt(AFileName));
+  for I := Low(VideoExtensions) to High(VideoExtensions) do
+    if Ext = VideoExtensions[I] then
       Exit(True);
   Result := False;
 end;

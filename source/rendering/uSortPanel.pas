@@ -45,6 +45,11 @@ unit uSortPanel;
     the button by the owner) with the number small in a corner, else the
     coloured folder; a folder that was not found (OnSlotMissing) is
     drawn grey and its bottom line says so.
+  - Icon preview (Day 24): while the mouse rests on a button with an
+    icon, the icon large (OnSlotPreview: up to its own size, 256 px at
+    most) in a box to the left of the panel, level with the button. The
+    picture then is FPreviewW wider than the panel (Left moves left;
+    hit tests use PanelLeft); the box takes no clicks.
   - Hit test: which part is at a point (button, its "..." corner, "+",
     pin, bottom line, empty panel, outside).
   - Edge opening: NoteMouse (every mouse move) and Tick (the viewer's
@@ -104,6 +109,10 @@ type
   TSlotIconEvent = function(ASlot, ASize: Integer): TBGRABitmap of object;
   { Slot ASlot's folder was not found (drawn greyed). }
   TSlotMissingEvent = function(ASlot: Integer): Boolean of object;
+  { The large preview of slot ASlot's icon (Day 24), at most AMaxSize px
+    square, and a line under it (ACaption); nil = no preview (no icon).
+    The picture stays the owner's. }
+  TSlotPreviewEvent = function(ASlot, AMaxSize: Integer; out ACaption: string): TBGRABitmap of object;
 
   TSortPanel = class(TObject)
   private
@@ -145,6 +154,13 @@ type
     FStrip: TBGRABitmap;         { the flash as a strip at the edge, panel closed }
     FOnSlotIcon: TSlotIconEvent;
     FOnSlotMissing: TSlotMissingEvent;
+    FOnSlotPreview: TSlotPreviewEvent;
+    { The hovered button's icon, large, to the left of the panel: the
+      panel and the preview as one picture (FOut), FPreviewW px wider on
+      the left than the panel; 0 = no preview (FBitmap alone). }
+    FOut: TBGRABitmap;
+    FPreviewW: Integer;
+    procedure ComposePreview;
     function SlotMissing(ASlot: Integer): Boolean;
     procedure DrawBadge(X, Y, W, H: Integer; const ANumber: string);
     function FlashColor: TBGRAPixel;
@@ -206,8 +222,12 @@ type
     { The picture, up to date; nil while hidden (except while a flash
       shows as a strip at the edge: then that, at Left / Top). }
     function Bitmap: TBGRABitmap;
+    { Where the picture goes: Left is FPreviewW left of the panel while
+      the large icon preview shows. }
     function Left: Integer;
     function Top: Integer;
+    { The panel's own left edge (hit tests, the folder menu). }
+    function PanelLeft: Integer;
 
     property Visible: Boolean read FVisible;
     property Pinned: Boolean read FPinned write SetPinned;
@@ -223,6 +243,7 @@ type
     { Stage 2: icons and missing folders, asked for while drawing. }
     property OnSlotIcon: TSlotIconEvent read FOnSlotIcon write FOnSlotIcon;
     property OnSlotMissing: TSlotMissingEvent read FOnSlotMissing write FOnSlotMissing;
+    property OnSlotPreview: TSlotPreviewEvent read FOnSlotPreview write FOnSlotPreview;
   end;
 
 implementation
@@ -257,6 +278,7 @@ end;
 destructor TSortPanel.Destroy;
 begin
   FStrip.Free;
+  FOut.Free;
   FBitmap.Free;
   inherited Destroy;
 end;
@@ -319,6 +341,7 @@ begin
   if not FVisible then
     Exit;
   FVisible := False;
+  FPreviewW := 0;
   FDirty := True;      { a new picture (the strip, or none): a new version }
   FEdgeSinceMs := 0;
   FHover.Part := ppNone;
@@ -354,7 +377,12 @@ begin
   if StripMode then
     Result := FViewW - ScaleI(StripPx, FScale)
   else
-    Result := FViewW - FWidth;
+    Result := PanelLeft - FPreviewW;
+end;
+
+function TSortPanel.PanelLeft: Integer;
+begin
+  Result := FViewW - FWidth;
 end;
 
 function TSortPanel.Top: Integer;
@@ -391,7 +419,7 @@ end;
 
 function TSortPanel.Contains(AX, AY: Integer): Boolean;
 begin
-  Result := FVisible and (AX >= Left) and (AX < Left + FWidth) and (AY >= 0) and (AY < FViewH);
+  Result := FVisible and (AX >= PanelLeft) and (AX < PanelLeft + FWidth) and (AY >= 0) and (AY < FViewH);
 end;
 
 function TSortPanel.HitTest(AX, AY: Integer): TPanelHit;
@@ -403,7 +431,7 @@ begin
   Result.Slot := -1;
   if not Contains(AX, AY) then
     Exit;
-  PX := AX - Left;
+  PX := AX - PanelLeft;
   PY := AY - Top;
   Result.Part := ppPanel;
   if PtInRect(PinRect, Point(PX, PY)) then
@@ -671,7 +699,10 @@ begin
     Exit(nil);
   if FDirty or (FBitmap = nil) then
     Redraw;
-  Result := FBitmap;
+  if (FPreviewW > 0) and (FOut <> nil) then
+    Result := FOut
+  else
+    Result := FBitmap;
 end;
 
 function TSortPanel.SlotMissing(ASlot: Integer): Boolean;
@@ -766,6 +797,7 @@ var
 begin
   FDirty := False;
   Inc(FVersion);
+  FPreviewW := 0;
   if (FWidth <= 0) or (FViewH <= 0) then
     Exit;
   if FBitmap = nil then
@@ -854,7 +886,7 @@ begin
         FBitmap.PutImage(IconX, R.Top + Pad div 2, Icon, dmDrawWithTransparency, 90)
       else
         FBitmap.PutImage(IconX, R.Top + Pad div 2, Icon, dmDrawWithTransparency);
-      DrawBadge(IconX, R.Top + Pad div 2, IconS, IconS, IntToStr(Row + 1));
+      { No number on an icon (user, Day 24): the picture alone. }
     end
     else
       DrawFolder(Pad, R.Top + Pad div 2, IconW, R.Height - Pad, Col, IntToStr(Row + 1));
@@ -900,7 +932,7 @@ begin
     else
       Line := FFolders.Slot(FHover.Slot).Folder
         + LineEnding + 'double-click  left: copy  right: move'
-        + LineEnding + 'swipe right: open the folder'
+        + LineEnding + 'swipe left or right: open the folder'
   else if FHover.Part = ppAdd then
     Line := 'click: choose a folder' + LineEnding + 'or drop folders here'
   else if FHover.Part = ppPin then
@@ -924,6 +956,68 @@ begin
     FBitmap.TextOut(Pad, Y2, FitText(FBitmap, Lines[I], FWidth - 2 * Pad), Dim);
     Inc(Y2, FBitmap.TextSize('Xg').cy);
   end;
+
+  ComposePreview;
+end;
+
+{ The mouse rests on a button with an icon: the icon, large (up to its
+  own size), in a box to the left of the panel, level with the button
+  (user, Day 24). Panel and box become one picture, FOut. }
+procedure TSortPanel.ComposePreview;
+var
+  Slot, Pad, Gap, CapH, MaxS, BoxW, BoxH, BoxY: Integer;
+  Pic: TBGRABitmap;
+  Cap: string;
+begin
+  FPreviewW := 0;
+  if (not Assigned(FOnSlotPreview)) or not (FHover.Part in [ppSlot, ppSlotMenu]) then
+    Exit;
+  Slot := FHover.Slot;
+  if (Slot < 0) or (Slot >= FFolders.Count) then
+    Exit;
+  Pad := ScaleI(6, FScale);
+  Gap := ScaleI(4, FScale);
+  CapH := ScaleI(18, FScale);
+  { As large as fits beside the panel, and never larger than 256 px
+    (scaled for the screen). }
+  MaxS := Min(ScaleI(256, FScale), Min(FViewH - 2 * Pad - CapH,
+    FViewW - FWidth - Gap - 2 * Pad - ScaleI(16, FScale)));
+  if MaxS < ScaleI(96, FScale) then
+    Exit;
+  Cap := '';
+  Pic := FOnSlotPreview(Slot, MaxS, Cap);
+  if (Pic = nil) or (Pic.Width <= 0) or (Pic.Height <= 0) then
+    Exit;
+
+  BoxW := Max(Pic.Width, ScaleI(96, FScale)) + 2 * Pad;
+  BoxH := Pic.Height + 2 * Pad;
+  if Cap <> '' then
+    Inc(BoxH, CapH);
+  { Always at the top of the view (user, Day 24), not level with the
+    button: it stays put while the mouse moves down the list. }
+  BoxY := 0;
+  FPreviewW := BoxW + Gap;
+
+  if FOut = nil then
+    FOut := TBGRABitmap.Create(FPreviewW + FWidth, FViewH)
+  else
+    FOut.SetSize(FPreviewW + FWidth, FViewH);
+  FOut.FillTransparent;
+  FOut.FontQuality := fqSystem;
+  FOut.FillRoundRectAntialias(0, BoxY, BoxW - 1, BoxY + BoxH - 1, ScaleI(5, FScale),
+    ScaleI(5, FScale), BGRA(12, 12, 16, 220));
+  FOut.RoundRectAntialias(0, BoxY, BoxW - 1, BoxY + BoxH - 1, ScaleI(5, FScale),
+    ScaleI(5, FScale), BGRA(255, 255, 255, 60), 1);
+  FOut.PutImage((BoxW - Pic.Width) div 2, BoxY + Pad, Pic, dmDrawWithTransparency);
+  if Cap <> '' then
+  begin
+    FOut.FontHeight := ScaleI(11, FScale);
+    Cap := FitText(FOut, Cap, BoxW - 2 * Pad);
+    FOut.TextOut((BoxW - FOut.TextSize(Cap).cx) div 2,
+      BoxY + Pad + Pic.Height + (CapH - FOut.TextSize(Cap).cy) div 2, Cap,
+      BGRA(160, 160, 160, 255));
+  end;
+  FOut.PutImage(FPreviewW, 0, FBitmap, dmSet);
 end;
 
 end.

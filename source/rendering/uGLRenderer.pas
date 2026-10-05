@@ -235,6 +235,8 @@ type
     FFilterPanelUploaded: Cardinal;
     FBadgeBar: TGLTextBar;       { the mode badge ("TC") }
     FBadgeUploaded: Cardinal;
+    FNoticeBar: TGLTextBar;      { a notice in the middle (Day 24) }
+    FNoticeUploaded: Cardinal;
 
     { The display filters: one small fragment shader, made at the first
       paint that needs it. }
@@ -256,7 +258,10 @@ type
     procedure DrawTextures(ATextures: TGLImageTextures; AWidth, AHeight: Integer;
       ALens: Boolean = False);
     procedure DrawLens(AWidth, AHeight: Integer);
-    procedure UpdateBar(var ABar: TGLTextBar; const AText: string; ACentered: Boolean);
+    { AFontName / AFontPt: a font of its own ('' / 0 = the standard; the
+      info line, Day 24). }
+    procedure UpdateBar(var ABar: TGLTextBar; const AText: string; ACentered: Boolean;
+      const AFontName: string = ''; AFontPt: Integer = 0);
     procedure UpdatePanel(ABitmap: TBGRABitmap; AVersion: Cardinal; var ABar: TGLTextBar;
       var AUploaded: Cardinal);
     function EnsureShader: Boolean;
@@ -292,6 +297,9 @@ type
   end;
 
 implementation
+
+uses
+  Forms;   { Screen.PixelsPerInch: the info line's font size in points }
 
 const
   { Not in FPC's GL 1.1 unit. }
@@ -772,6 +780,8 @@ begin
   ForgetBar(FFilterPanelBar);
   ForgetBar(FBadgeBar);
   FBadgeUploaded := 0;
+  ForgetBar(FNoticeBar);
+  FNoticeUploaded := 0;
   FFilterPanelUploaded := 0;
   { The shader went with the context: made again when needed. }
   FShader := 0;
@@ -1170,15 +1180,21 @@ begin
 end;
 
 { Redraws a bar's bitmap and texture if its text changed. }
-procedure TGLRenderer.UpdateBar(var ABar: TGLTextBar; const AText: string; ACentered: Boolean);
+procedure TGLRenderer.UpdateBar(var ABar: TGLTextBar; const AText: string; ACentered: Boolean;
+  const AFontName: string; AFontPt: Integer);
 var
   Bmp: TBGRABitmap;
   Lines: TStringArray;
   I, LineH, W, H, Y, TW: Integer;
   Base: PBGRAPixel;
   Format: GLenum;
+  Key: string;
 begin
-  if (AText = ABar.Text) and ((ABar.Texture <> 0) or (AText = '')) then
+  { The text, and the font if it has its own (a new font: a new picture). }
+  Key := AText;
+  if (AText <> '') and ((AFontName <> '') or (AFontPt > 0)) then
+    Key := AText + #0 + AFontName + #0 + IntToStr(AFontPt);
+  if (Key = ABar.Text) and ((ABar.Texture <> 0) or (AText = '')) then
     Exit;
 
   if ABar.Texture <> 0 then
@@ -1186,7 +1202,7 @@ begin
     glDeleteTextures(1, @ABar.Texture);
     ABar.Texture := 0;
   end;
-  ABar.Text := AText;
+  ABar.Text := Key;
   ABar.Width := 0;
   ABar.Height := 0;
   if AText = '' then
@@ -1207,6 +1223,13 @@ begin
         an opaque one (coloured fringes otherwise). }
       Bmp.FontQuality := fqSystem;
     end;
+    if AFontName <> '' then
+      Bmp.FontName := AFontName;
+    { Points at the screen's resolution, as the CPU renderer's Font.Size
+      gives them. FontHeight is the full line height, about 4/3 of the
+      em (the standard sizes: 17 here, 13 on the CPU). }
+    if AFontPt > 0 then
+      Bmp.FontHeight := Max(8, Round(AFontPt * Screen.PixelsPerInch / 72 * 4 / 3));
 
     W := 0;
     LineH := 0;
@@ -1521,7 +1544,7 @@ begin
     SolidWidth := 0;
   SetupScreenProjection(AWidth, AHeight);
   Bottom := AHeight;
-  UpdateBar(FInfoBar, InfoLine, False);
+  UpdateBar(FInfoBar, InfoLine, False, InfoFontName, InfoFontSize);
   if FInfoBar.Texture <> 0 then
   begin
     Dec(Bottom, Abs(FInfoBar.Height));
@@ -1570,6 +1593,19 @@ begin
       glEnable(GL_BLEND);
       glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
       DrawBar(FBadgeBar, AWidth - FBadgeBar.Width - 8, AHeight - Abs(FBadgeBar.Height) - 6);
+      glDisable(GL_BLEND);
+    end;
+  end;
+  { A notice, in the middle (flashing: drawn while NoticeOn). }
+  if NoticeOn and (NoticeBitmap <> nil) then
+  begin
+    UpdatePanel(NoticeBitmap, NoticeVersion, FNoticeBar, FNoticeUploaded);
+    if FNoticeBar.Texture <> 0 then
+    begin
+      glEnable(GL_BLEND);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      DrawBar(FNoticeBar, (AWidth - FNoticeBar.Width) div 2,
+        (AHeight - Abs(FNoticeBar.Height)) div 2);
       glDisable(GL_BLEND);
     end;
   end;

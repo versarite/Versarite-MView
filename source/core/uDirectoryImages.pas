@@ -76,6 +76,7 @@ type
     FEntries: array of TImageEntry;
     FCount: Integer;
     FSortMode: TSortMode;
+    FVideoCount: Integer;        { videos in the folder (not listed; Day 24) }
 
     procedure SetSortMode(AMode: TSortMode);
     function CompareEntries(const A, B: TImageEntry): Integer;
@@ -93,6 +94,8 @@ type
     procedure BeginFill(const ADirectory: string);
     procedure AddEntry(const AFileName: string; ASize: Int64; AModified: TDateTime);
     procedure EndFill;
+    { A video was found while filling (counted, not listed). }
+    procedure AddVideo;
 
     { A copy of ASource (directory and entries), sorted in this list's
       own sort mode. }
@@ -111,6 +114,8 @@ type
     procedure AddFile(const AFileName: string; ASize: Int64; AModified: TDateTime);
 
     property Directory: string read FDirectory;
+    { Videos in the folder (IsVideoFile): only counted. }
+    property VideoCount: Integer read FVideoCount;
     { Setting the sort mode re-sorts the list at once. }
     property SortMode: TSortMode read FSortMode write SetSortMode;
   end;
@@ -131,6 +136,7 @@ begin
   FDirectory := '';
   FEntries := nil;
   FCount := 0;
+  FVideoCount := 0;
 end;
 
 procedure TDirectoryImages.Scan(const ADirectory: string);
@@ -159,7 +165,9 @@ begin
           FEntries[FCount].Size := SearchRec.Size;
           FEntries[FCount].Modified := FileDateToDateTime(SearchRec.Time);
           Inc(FCount);
-        end;
+        end
+        else if ((SearchRec.Attr and faDirectory) = 0) and IsVideoFile(SearchRec.Name) then
+          Inc(FVideoCount);
       until FindNext(SearchRec) <> 0;
     finally
       FindClose(SearchRec);
@@ -191,6 +199,11 @@ begin
   Sort;
 end;
 
+procedure TDirectoryImages.AddVideo;
+begin
+  Inc(FVideoCount);
+end;
+
 procedure TDirectoryImages.Assign(ASource: TDirectoryImages);
 var
   I: Integer;
@@ -203,6 +216,7 @@ begin
   for I := 0 to ASource.FCount - 1 do
     FEntries[I] := ASource.FEntries[I];
   FCount := ASource.FCount;
+  FVideoCount := ASource.FVideoCount;
   if ASource.FSortMode <> FSortMode then
     Sort;
 end;

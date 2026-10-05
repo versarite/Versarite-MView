@@ -74,6 +74,19 @@ uses
 
 type
 
+  { The parts of the info line (status line), [InfoLine] (user, Day 24):
+    each on (1) or off (0); shown in the order of their lines in the ini. }
+  TInfoItem = (iiFileName, iiDimensions, iiFolder, iiPosition, iiVideos, iiSorting,
+    iiZoom, iiState, iiAnimation, iiFilters, iiMessages);
+  TInfoItems = array of TInfoItem;
+
+const
+  { Their keys in [InfoLine], in the default order. }
+  InfoItemKeys: array[TInfoItem] of string = ('FileName', 'Dimensions', 'Folder',
+    'Position', 'Videos', 'Sorting', 'Zoom', 'State', 'Animation', 'Filters', 'Messages');
+
+type
+
   TConfig = class(TObject)
   private
 
@@ -110,6 +123,7 @@ type
     FRecursive       : Boolean;
     FWrapAround      : Boolean;
     FClimbUp         : Boolean;
+    FRecurseFromRoot : Boolean;
     FWrapScope       : TWrapScope;
     FPlaceholderForBadImages: Boolean;
 
@@ -174,7 +188,15 @@ type
     FLensSize        : Integer;
     FLensSharpen     : Integer;
 
+    { Info line (Day 24) }
+
+    FInfoFont        : string;
+    FInfoFontSize    : Integer;
+    FInfoAll         : TInfoItems;           { every part, in the ini's order }
+    FInfoOn          : array[TInfoItem] of Boolean;
+
     procedure LoadDefaults;
+    procedure ReadInfoLine(AIni: TCustomIniFile);
     procedure WriteSort(AIni: TCustomIniFile);
     procedure Validate;
 
@@ -236,6 +258,10 @@ type
       higher instead of wrapping around (up to one level below the
       drive). }
     property ClimbUp         : Boolean    read FClimbUp;
+    { Day 24 (user): with Recursive, a drive root (C:\) is opened with its
+      subfolders only if this is on; off = the root's own images only
+      (a whole drive would be scanned otherwise). }
+    property RecurseFromRoot : Boolean    read FRecurseFromRoot;
     property WrapScope       : TWrapScope read FWrapScope;
     property PlaceholderForBadImages: Boolean read FPlaceholderForBadImages;
 
@@ -355,6 +381,15 @@ type
     property LensSize        : Integer read FLensSize write FLensSize;
     property LensSharpen     : Integer read FLensSharpen write FLensSharpen;
 
+    { Info line ([InfoLine], Day 24) }
+
+    { The parts shown, in their order (the ini's lines; =0 left out). }
+    function InfoItems: TInfoItems;
+    { The info line's font: '' = the standard one; size in points, 0 =
+      the standard size. }
+    property InfoFont        : string read FInfoFont;
+    property InfoFontSize    : Integer read FInfoFontSize;
+
   end;
 
 { One line of help for a key, for the settings editor. '' if the key
@@ -401,6 +436,7 @@ const
   KEY_WRAP_SCOPE        = 'WrapScope';
   KEY_PLACEHOLDER       = 'PlaceholderForBadImages';
   KEY_CLIMB_UP          = 'ClimbUp';
+  KEY_RECURSE_FROM_ROOT = 'RecurseFromDriveRoot';
   KEY_PRELOAD_COUNT     = 'PreloadCount';
   KEY_PRELOAD_BEHIND    = 'PreloadBehind';
   KEY_DECODE_THREADS    = 'DecodeThreads';
@@ -434,6 +470,9 @@ const
   SEC_FILTERS           = 'Filters';
   KEY_FILTER_PINNED     = 'Pinned';
   KEY_AUTO_FILTER       = 'AutoFilter';
+  SEC_INFOLINE          = 'InfoLine';
+  KEY_INFO_FONT         = 'Font';
+  KEY_INFO_FONT_SIZE    = 'FontSize';
   SEC_MAGNIFIER         = 'Magnifier';
   KEY_LENS_MAG          = 'MagnificationPercent';
   KEY_LENS_SIZE         = 'Size';
@@ -454,6 +493,8 @@ begin
 end;
 
 procedure TConfig.LoadDefaults;
+var
+  It: TInfoItem;
 begin
   FOpenLastSession := True;
   FLastDirectory   := '';
@@ -478,6 +519,7 @@ begin
   FRecursive       := True;
   FWrapAround      := True;
   FClimbUp         := False;
+  FRecurseFromRoot := False;
   FWrapScope       := wsTree;
   FPlaceholderForBadImages := True;
 
@@ -520,6 +562,15 @@ begin
   FLensMagPercent  := 300;
   FLensSize        := 300;
   FLensSharpen     := 0;      { user: off by default }
+  FInfoFont        := '';
+  FInfoFontSize    := 0;
+  SetLength(FInfoAll, 0);
+  for It := Low(TInfoItem) to High(TInfoItem) do
+  begin
+    SetLength(FInfoAll, Length(FInfoAll) + 1);
+    FInfoAll[High(FInfoAll)] := It;
+    FInfoOn[It] := True;
+  end;
   { The slots are not defaults: an empty list. }
   FSortFolders.Clear;
 end;
@@ -559,6 +610,7 @@ begin
     FRecursive  := Ini.ReadBool(SEC_NAVIGATION, KEY_RECURSIVE, FRecursive);
     FWrapAround := Ini.ReadBool(SEC_NAVIGATION, KEY_WRAP_AROUND, FWrapAround);
     FClimbUp    := Ini.ReadBool(SEC_NAVIGATION, KEY_CLIMB_UP, FClimbUp);
+    FRecurseFromRoot := Ini.ReadBool(SEC_NAVIGATION, KEY_RECURSE_FROM_ROOT, FRecurseFromRoot);
     FWrapScope  := StringToWrapScope(Ini.ReadString(SEC_NAVIGATION, KEY_WRAP_SCOPE, ''), FWrapScope);
     FPlaceholderForBadImages := Ini.ReadBool(SEC_NAVIGATION, KEY_PLACEHOLDER, FPlaceholderForBadImages);
 
@@ -611,6 +663,8 @@ begin
       FLensSize := 300;
     if (FLensSharpen < 0) or (FLensSharpen > 2) then
       FLensSharpen := 0;
+
+    ReadInfoLine(Ini);
   finally
     Ini.Free;
   end;
@@ -621,6 +675,7 @@ end;
 procedure TConfig.Save;
 var
   Ini: TIniFile;
+  I: Integer;
 begin
   Ini := TIniFile.Create(FIniFileName);
   try
@@ -647,6 +702,7 @@ begin
     Ini.WriteBool(SEC_NAVIGATION, KEY_RECURSIVE, FRecursive);
     Ini.WriteBool(SEC_NAVIGATION, KEY_WRAP_AROUND, FWrapAround);
     Ini.WriteBool(SEC_NAVIGATION, KEY_CLIMB_UP, FClimbUp);
+    Ini.WriteBool(SEC_NAVIGATION, KEY_RECURSE_FROM_ROOT, FRecurseFromRoot);
     Ini.WriteString(SEC_NAVIGATION, KEY_WRAP_SCOPE, WrapScopeToString(FWrapScope));
     Ini.WriteBool(SEC_NAVIGATION, KEY_PLACEHOLDER, FPlaceholderForBadImages);
 
@@ -683,9 +739,76 @@ begin
     Ini.WriteInteger(SEC_MAGNIFIER, KEY_LENS_MAG, FLensMagPercent);
     Ini.WriteInteger(SEC_MAGNIFIER, KEY_LENS_SIZE, FLensSize);
     Ini.WriteInteger(SEC_MAGNIFIER, KEY_LENS_SHARPEN, FLensSharpen);
+
+    { The info line: a key already there keeps its place (the order is
+      the user's); a new one goes at the end. }
+    Ini.WriteString(SEC_INFOLINE, KEY_INFO_FONT, FInfoFont);
+    Ini.WriteInteger(SEC_INFOLINE, KEY_INFO_FONT_SIZE, FInfoFontSize);
+    for I := 0 to High(FInfoAll) do
+      Ini.WriteBool(SEC_INFOLINE, InfoItemKeys[FInfoAll[I]], FInfoOn[FInfoAll[I]]);
   finally
     Ini.Free;
   end;
+end;
+
+{ [InfoLine]: the font, and the parts in the order of their lines (user,
+  Day 24). A part whose line is missing is on, after the others. }
+procedure TConfig.ReadInfoLine(AIni: TCustomIniFile);
+var
+  Keys: TStringList;
+  Seen: array[TInfoItem] of Boolean;
+  It: TInfoItem;
+  I: Integer;
+
+  procedure AddItem(AItem: TInfoItem);
+  begin
+    SetLength(FInfoAll, Length(FInfoAll) + 1);
+    FInfoAll[High(FInfoAll)] := AItem;
+    Seen[AItem] := True;
+  end;
+
+begin
+  FInfoFont := Trim(AIni.ReadString(SEC_INFOLINE, KEY_INFO_FONT, FInfoFont));
+  FInfoFontSize := AIni.ReadInteger(SEC_INFOLINE, KEY_INFO_FONT_SIZE, FInfoFontSize);
+  if (FInfoFontSize < 0) or (FInfoFontSize > 72) then
+    FInfoFontSize := 0;
+  if (FInfoFontSize > 0) and (FInfoFontSize < 6) then
+    FInfoFontSize := 6;
+  for It := Low(TInfoItem) to High(TInfoItem) do
+    Seen[It] := False;
+  SetLength(FInfoAll, 0);
+  Keys := TStringList.Create;
+  try
+    AIni.ReadSection(SEC_INFOLINE, Keys);
+    for I := 0 to Keys.Count - 1 do
+      for It := Low(TInfoItem) to High(TInfoItem) do
+        if (not Seen[It]) and SameText(Trim(Keys[I]), InfoItemKeys[It]) then
+        begin
+          AddItem(It);
+          FInfoOn[It] := AIni.ReadBool(SEC_INFOLINE, InfoItemKeys[It], True);
+        end;
+  finally
+    Keys.Free;
+  end;
+  for It := Low(TInfoItem) to High(TInfoItem) do
+    if not Seen[It] then
+    begin
+      AddItem(It);
+      FInfoOn[It] := True;
+    end;
+end;
+
+function TConfig.InfoItems: TInfoItems;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to High(FInfoAll) do
+    if FInfoOn[FInfoAll[I]] then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := FInfoAll[I];
+    end;
 end;
 
 procedure TConfig.WriteSort(AIni: TCustomIniFile);
@@ -856,6 +979,8 @@ const
 function ConfigKeyHelp(const ASection, AKey: string): string;
 var
   I: Integer;
+  It: TInfoItem;
+  IsPart: Boolean;
 begin
   Result := '';
   if SameText(ASection, SEC_DEBUG) and SameText(AKey, KEY_SAVE_IMAGE_DIR) then
@@ -869,6 +994,28 @@ begin
     Exit('1 = only one MView (default): an image or folder opened while MView runs (e.g. from '
       + 'Total Commander) opens in the running MView, which comes to the front. 0 = a new MView '
       + 'each time. Read when MView starts.');
+  if SameText(ASection, SEC_NAVIGATION) and SameText(AKey, KEY_RECURSE_FROM_ROOT) then
+    Exit('0 = a drive root (C:\, also a network share''s root) is opened without its subfolders, '
+      + 'even with Recursive=1: only the images directly in it (default; a whole drive would '
+      + 'otherwise be scanned for images). 1 = with its subfolders, like any other folder.');
+  if SameText(ASection, SEC_INFOLINE) then
+  begin
+    IsPart := False;
+    for It := Low(TInfoItem) to High(TInfoItem) do
+      if SameText(AKey, InfoItemKeys[It]) then
+        IsPart := True;
+    if SameText(AKey, KEY_INFO_FONT) then
+      Exit('The info line''s font, e.g. Segoe UI, Consolas, Arial. Empty = the standard font.');
+    if SameText(AKey, KEY_INFO_FONT_SIZE) then
+      Exit('The info line''s font size in points (6 .. 72). 0 = the standard size.');
+    if IsPart then
+      Exit('A part of the info line (bottom): 1 = shown, 0 = left out. The parts appear in the '
+      + 'order of these lines: move a line up or down to change the order.' + LineEnding
+      + 'FileName, Dimensions (W x H), Folder, Position (12 / 40), Videos (in the folder), '
+      + 'Sorting (by date / by name), Zoom (52 % = size on screen, angle), State (loading, '
+      + 'skimming, scanning), Animation (frames), Filters ([filtered, auto ...]), Messages '
+      + '(what MView just did).');
+  end;
   if SameText(ASection, SEC_MAGNIFIER) then
   begin
     if SameText(AKey, KEY_LENS_MAG) then

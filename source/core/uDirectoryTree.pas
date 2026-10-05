@@ -308,7 +308,9 @@ begin
             { The same fields TDirectoryImages.Scan takes, so a key
               made from them matches MakeImageKey on the worker. }
             ANode.FImages.AddEntry(Prefix + SearchRec.Name, SearchRec.Size,
-              FileDateToDateTime(SearchRec.Time));
+              FileDateToDateTime(SearchRec.Time))
+          else if FCollectImages and IsVideoFile(SearchRec.Name) then
+            ANode.FImages.AddVideo;        { counted only (Day 24) }
         until FindNext(SearchRec) <> 0;
       finally
         FindClose(SearchRec);

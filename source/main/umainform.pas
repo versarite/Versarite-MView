@@ -311,8 +311,9 @@ uses
 const
   { The About box: what MView is, and where it comes from. }
   AboutText =
-    'Versarite MView 0.21.0-alpha' + LineEnding +
-    'A microscopy image viewer, driven by the mouse.' + LineEnding +
+    'Versarite MView 1.0' + LineEnding +
+    'A fast image viewer, driven by the mouse.' + LineEnding +
+    'Its microscopy edition (measuring, metadata, editing) follows as a branch of its own.' + LineEnding +
     LineEnding +
     'Written with support from Claude/Opus 5.5 and ChatGPT' + LineEnding +
     LineEnding +
@@ -1052,6 +1053,10 @@ begin
       FSideItem.Checked := FSideBySide;
       FLockFiltersItem.Checked := FMView.FiltersLocked;
       FApplyFiltersItem.Enabled := FMView.CanApplyFilters;
+      if FMView.ViewRotated then
+        FApplyFiltersItem.Caption := 'Apply filters and rotation to a copy'
+      else
+        FApplyFiltersItem.Caption := 'Apply filters to a copy';
       FResizeItem.Enabled := FMView.CanResizeToShown;
       FMagnifierItem.Checked := FMView.MagnifierOn;
       for I := 0 to 2 do
@@ -1274,9 +1279,9 @@ begin
   begin
     Item := NewItem(nil, MenuText(Folders.Slot(ASlot).Folder), nil);
     Item.Enabled := False;
-    { Into the folder (also: a swipe to the right over the button, or a
+    { Into the folder (also: a swipe left or right over the button, or a
       wheel click on it). }
-    NewItem(nil, 'Open this folder  (swipe right over the button)', @HandleSortOpenClick);
+    NewItem(nil, 'Open this folder  (swipe over the button)', @HandleSortOpenClick);
     NewItem(nil, '-', nil);
   end;
   NewItem(nil, 'Choose folder ...', @HandleSortChooseClick);

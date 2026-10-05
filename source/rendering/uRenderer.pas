@@ -105,6 +105,11 @@ uses
   uImageSaver,
   uStopwatch;
 
+const
+  { In InfoText: where the zoom ("52 % = 1997 x 1331", the angle) goes;
+    none = no zoom in the line (user, Day 24: [InfoLine] Zoom=0). }
+  InfoZoomMarker = #1;
+
 type
 
   TViewMode = (vmFit, vmOriginal);
@@ -148,6 +153,8 @@ type
     FZoomStepPercent: Double;
     FMessage: string;
     FInfoText: string;
+    FInfoFontName: string;       { '' = the standard font }
+    FInfoFontSize: Integer;      { points; 0 = the standard size }
     FShowInfo: Boolean;
     FShowDiagnostics: Boolean;
     FDiagnosticsText: string;
@@ -176,6 +183,14 @@ type
     FBadgeOn: Boolean;
     FBadgeBmp: TBGRABitmap;
     FBadgeVersion: Cardinal;
+    { A short notice in the middle of the view (user, Day 24: "TC
+      connection, directory change disabled!"), in the badge's colours;
+      NoticeOn: the flash's phase. TMView times it. }
+    FNoticeText: string;
+    FNoticeStyle: Integer;
+    FNoticeOn: Boolean;
+    FNoticeBmp: TBGRABitmap;
+    FNoticeVersion: Cardinal;
     FEditMode: Boolean;
     FSelection: TImageRect;
     FOverlaySolid: Boolean;
@@ -283,6 +298,9 @@ type
     property Image: IDecodedImage read FImage;
     property ZoomStepPercent: Double read FZoomStepPercent write FZoomStepPercent;
     property InfoText: string read FInfoText write FInfoText;
+    { The info line's font ([InfoLine] Font / FontSize, Day 24). }
+    property InfoFontName: string read FInfoFontName write FInfoFontName;
+    property InfoFontSize: Integer read FInfoFontSize write FInfoFontSize;
     property ShowInfo: Boolean read FShowInfo write FShowInfo;
     property ShowDiagnostics: Boolean read FShowDiagnostics write FShowDiagnostics;
     { The part of the diagnostics line that TMView knows (decode,
@@ -345,6 +363,13 @@ type
     { Its picture (nil = none); BadgeVersion changes with it. }
     function BadgeBitmap: TBGRABitmap;
     property BadgeVersion: Cardinal read FBadgeVersion;
+    { The notice in the middle ('' = none); AStyle as for the badge (1
+      light blue, 2 amber). Shown while NoticeOn. }
+    procedure SetNotice(const AText: string; AStyle: Integer = 2);
+    property NoticeText: string read FNoticeText;
+    property NoticeOn: Boolean read FNoticeOn write FNoticeOn;
+    function NoticeBitmap: TBGRABitmap;
+    property NoticeVersion: Cardinal read FNoticeVersion;
     { The magnifier: drawn over the image (under the texts and panels). }
     property Lens: TLensState read FLens write FLens;
     property OnImagePainted: TImagePaintedEvent read FOnImagePainted write FOnImagePainted;
@@ -472,6 +497,7 @@ destructor TRenderer.Destroy;
 begin
   FImage := nil;
   FBadgeBmp.Free;
+  FNoticeBmp.Free;
   inherited Destroy;
 end;
 
@@ -552,6 +578,45 @@ begin
     Inc(FBadgeVersion);
   end;
   Result := FBadgeBmp;
+end;
+
+procedure TRenderer.SetNotice(const AText: string; AStyle: Integer);
+begin
+  if (AText = FNoticeText) and (AStyle = FNoticeStyle) then
+    Exit;
+  FNoticeText := AText;
+  FNoticeStyle := AStyle;
+  FreeAndNil(FNoticeBmp);
+  Inc(FNoticeVersion);
+end;
+
+{ Large bold dark text on a rounded label in the badge's colour. }
+function TRenderer.NoticeBitmap: TBGRABitmap;
+var
+  TS: TSize;
+  Fill: TBGRAPixel;
+begin
+  Result := nil;
+  if FNoticeText = '' then
+    Exit;
+  if FNoticeBmp = nil then
+  begin
+    FNoticeBmp := TBGRABitmap.Create(1, 1);
+    FNoticeBmp.FontHeight := 24;
+    FNoticeBmp.FontStyle := [fsBold];
+    FNoticeBmp.FontQuality := fqSystemClearType;
+    TS := FNoticeBmp.TextSize(FNoticeText);
+    FNoticeBmp.SetSize(TS.cx + 40, TS.cy + 20);
+    FNoticeBmp.Fill(BGRAPixelTransparent);
+    if FNoticeStyle = 1 then
+      Fill := BGRA(140, 200, 255, 245)
+    else
+      Fill := BGRA(255, 190, 60, 245);
+    FNoticeBmp.FillRoundRectAntialias(0, 0, FNoticeBmp.Width - 1, FNoticeBmp.Height - 1, 9, 9, Fill);
+    FNoticeBmp.TextOut(20, 10, FNoticeText, BGRA(20, 20, 20, 255));
+    Inc(FNoticeVersion);
+  end;
+  Result := FNoticeBmp;
 end;
 
 procedure TRenderer.ImageChanged(AKeepView: Boolean);
@@ -801,22 +866,35 @@ end;
 
 function TRenderer.InfoLine: string;
 var
-  W, H: Integer;
+  W, H, P: Integer;
+  Zoom: string;
 begin
   Result := '';
   if not FShowInfo then
     Exit;
   Result := FInfoText;
+  P := Pos(InfoZoomMarker, Result);
+  if P = 0 then
+    Exit;
   { The scale, and the size on screen in pixels (user, Day 22: "it
-    replaces a resize function"; Resize to the size shown makes it). }
+    replaces a resize function"; Resize to the size shown makes it),
+    where the marker is. }
+  Zoom := '';
   if FLastScale > 0 then
   begin
-    Result := Result + Format('   %d %%', [Round(FLastScale * 100)]);
+    Zoom := Format('%d %%', [Round(FLastScale * 100)]);
     if ShownSize(W, H) then
-      Result := Result + Format(' = %d x %d', [W, H]);
+      Zoom := Zoom + Format(' = %d x %d', [W, H]);
   end;
   if (FImage <> nil) and (FView.Angle <> 0) then
-    Result := Result + Format('   %.0f°', [FView.Angle]);
+    Zoom := Trim(Zoom + Format('   %.0f°', [FView.Angle]));
+  Delete(Result, P, Length(InfoZoomMarker));
+  if Zoom <> '' then
+    Insert(Zoom, Result, P)
+  else if Copy(Result, P, 5) = '     ' then
+    Delete(Result, P, 5)                 { no zoom yet: no gap either }
+  else if (P > 5) and (Copy(Result, P - 5, 5) = '     ') then
+    Delete(Result, P - 5, 5);
 end;
 
 function TRenderer.DiagnosticsLine: string;
@@ -1261,6 +1339,10 @@ begin
   if FBadgeOn and (BadgeBitmap <> nil) then
     BadgeBitmap.Draw(ACanvas, AWidth - BadgeBitmap.Width - 8,
       AHeight - BadgeBitmap.Height - 6, False);
+  { A notice, in the middle (flashing: drawn while NoticeOn). }
+  if FNoticeOn and (NoticeBitmap <> nil) then
+    NoticeBitmap.Draw(ACanvas, (AWidth - NoticeBitmap.Width) div 2,
+      (AHeight - NoticeBitmap.Height) div 2, False);
   { The sort panel, on top (with its transparency). }
   if Assigned(Panel) then
     Panel.Draw(ACanvas, PanelX, PanelY, False);
@@ -1624,7 +1706,7 @@ function TCpuRenderer.DrawBar(ACanvas: TCanvas; AWidth, ABottom: Integer; const 
 var
   TextH, DX, DY: Integer;
 begin
-  ACanvas.Font.Height := -13;
+  { The font is the caller's (the info line has its own). }
   TextH := ACanvas.TextHeight(AText);
   Result := ABottom - TextH - 8;
 
@@ -1652,7 +1734,7 @@ end;
 procedure TCpuRenderer.DrawOverlays(ACanvas: TCanvas; AWidth, AHeight: Integer);
 var
   Bottom, TextH, TopUsed, I: Integer;
-  Text: string;
+  Text, OldFontName: string;
   Lines: TStringArray;
 
   { White text with a dark outline at AX, AY. }
@@ -1678,10 +1760,19 @@ begin
   Text := InfoLine;
   if Text <> '' then
   begin
+    { Its own font ([InfoLine] Font / FontSize, Day 24). }
+    OldFontName := ACanvas.Font.Name;
+    if InfoFontName <> '' then
+      ACanvas.Font.Name := InfoFontName;
+    if InfoFontSize > 0 then
+      ACanvas.Font.Size := InfoFontSize
+    else
+      ACanvas.Font.Height := -13;
     { It ends before the mode badge (bottom right). }
-    ACanvas.Font.Height := -13;
     Text := FitCanvasText(ACanvas, Text, AWidth - 16 - BadgeRoom);
     Bottom := DrawBar(ACanvas, AWidth, Bottom, Text, OverlaySolid);
+    ACanvas.Font.Name := OldFontName;
+    ACanvas.Font.Height := -13;
   end;
 
   { The diagnostics may have several lines: the last at the bottom. }

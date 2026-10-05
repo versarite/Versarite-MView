@@ -274,7 +274,7 @@ begin
   Result.Found := False;
   Result.TargetFile := '';
 
-  Path := ExcludeTrailingPathDelimiter(ExpandFileName(APath));
+  Path := ExcludeTrailingPathDelimiter(TNavigator.FullPath(APath));
   if DirectoryExists(Path) then
   begin
     Result.Found := True;
@@ -283,7 +283,7 @@ begin
     { Resume on a given file, if it lies inside this folder's tree. }
     if ASelect <> '' then
     begin
-      SelectPath := ExpandFileName(ASelect);
+      SelectPath := TNavigator.FullPath(ASelect);
       SelectDirectory := ExcludeTrailingPathDelimiter(ExtractFileDir(SelectPath));
       if TNavigator.IsInside(SelectDirectory, Path) and FileExists(SelectPath) then
       begin

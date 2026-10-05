@@ -469,6 +469,9 @@ type
     { Total Commander answered the last poll: MView follows it now
       ("[TC]" in the info line; subfolders off). }
     FFollowing: Boolean;
+    { A notice flashing in the middle of the view (FlashNotice); 0 =
+      none. }
+    FNoticeStartMs: Double;
     { The magnifier (Phase H, G6): its state is the renderer's (Lens);
       a left drag in progress (magnification sideways, size up / down)
       starts from these. }
@@ -491,6 +494,13 @@ type
     procedure CropSelection;
     procedure GoBack;
     procedure ParentFolder;
+    { While MView follows Total Commander, Total Commander decides the
+      folder: steps to other folders are refused (user, Day 24). }
+    function TCFolderLock: Boolean;
+    { A short notice in the middle of the view, flashing twice, then
+      steady; gone after NoticeMs. }
+    procedure FlashNotice(const AText: string);
+    procedure TCFolderLocked;
     procedure SetSort(AMode: TSortMode);
     procedure ShowZone(AZone: Integer);
     procedure ShowGesturePreview(AZone, AValue: Integer);
@@ -543,6 +553,7 @@ type
     procedure RequestIcons(AForce: Boolean);
     procedure HandleIconsChanged(Sender: TObject);
     function PanelSlotIcon(ASlot, ASize: Integer): TBGRABitmap;
+    function PanelSlotPreview(ASlot, AMaxSize: Integer; out ACaption: string): TBGRABitmap;
     function PanelSlotMissing(ASlot: Integer): Boolean;
     procedure HandleIconWritten(const AResult: TFileJobResult);
     { Filters (Phase H). }
@@ -662,7 +673,7 @@ type
     { The settings screen's Ctrl+V with an image in the clipboard: the
       viewer starts with it (the last session opens behind it). }
     procedure StartWithPaste;
-    { Browse slot ASlot's folder (a swipe to the right over its button,
+    { Browse slot ASlot's folder (a swipe left or right over its button,
       a wheel click on it, or its "..." menu). }
     procedure OpenSortFolder(ASlot: Integer);
     { A copy, move or delete (or undo) is waiting or running: shutting
@@ -709,6 +720,8 @@ type
     { "Apply filters to a copy": a new image (like Crop) with the filters
       in its pixels, named after them; then Save or the sort panel. }
     function CanApplyFilters: Boolean;
+    { The view is turned (the copy of "Apply filters to a copy" takes it). }
+    function ViewRotated: Boolean;
     procedure ApplyFiltersToCopy;
     { "Resize to the size shown" (user, Day 22: copy / move / save always
       wrote the original size): a new image (like Crop) at the size it has
@@ -775,7 +788,10 @@ const
   { How long the zone's name stays on screen (mouse language). }
   ZoneLabelMs = 1500;
 
-  { Sort panel: a swipe to the right over a button opens its folder; at
+  { A notice in the middle (FlashNotice): this long, flashing at first. }
+  NoticeMs = 1800;
+
+  { Sort panel: a swipe left or right over a button opens its folder; at
     least this far (px at 96 dpi). }
   SwipePx = 40;
 
@@ -943,6 +959,8 @@ begin
   FRenderer.ShowDiagnostics := FConfig.ShowDiagnostics;
   FRenderer.OverlaySolid := FConfig.OverlaySolid;
   FRenderer.SetOverlayColorName(FConfig.OverlayColor);
+  FRenderer.InfoFontName := FConfig.InfoFont;
+  FRenderer.InfoFontSize := FConfig.InfoFontSize;
   FRenderer.OnImagePainted := @HandleImagePainted;
   FRenderer.SetMessage('');
 
@@ -977,6 +995,7 @@ begin
   FIcons := TSortIcons.Create;
   FIcons.OnChanged := @HandleIconsChanged;
   FPanel.OnSlotIcon := @PanelSlotIcon;
+  FPanel.OnSlotPreview := @PanelSlotPreview;
   FPanel.OnSlotMissing := @PanelSlotMissing;
   if FPanel.Pinned then
     FPanel.Show;
@@ -1007,6 +1026,8 @@ begin
   ARenderer.ShowDiagnostics := FRenderer.ShowDiagnostics;
   ARenderer.OverlaySolid := FConfig.OverlaySolid;
   ARenderer.SetOverlayColorName(FConfig.OverlayColor);
+  ARenderer.InfoFontName := FConfig.InfoFont;
+  ARenderer.InfoFontSize := FConfig.InfoFontSize;
   ARenderer.EditMode := FRenderer.EditMode;
   ARenderer.SetFilters(FFilters);
   ARenderer.Lens := FRenderer.Lens;
@@ -1050,6 +1071,26 @@ begin
     ShowMessageText(NoStartMessage);
 end;
 
+{ APath opens a drive root (a folder like C:\ or \\server\share, or an
+  image directly in one). By the name only: no disk access here. }
+function OpensDriveRoot(const APath: string): Boolean;
+var
+  P, D: string;
+
+  function IsRoot(const AFolder: string): Boolean;
+  begin
+    Result := (AFolder <> '')
+      and SameText(ExcludeTrailingPathDelimiter(ExtractFileDrive(AFolder)), AFolder);
+  end;
+
+begin
+  P := ExcludeTrailingPathDelimiter(TNavigator.FullPath(APath));
+  if IsRoot(P) then
+    Exit(True);
+  D := ExcludeTrailingPathDelimiter(ExtractFileDir(P));
+  Result := IsRoot(D) and IsSupportedImageFile(P);
+end;
+
 { Spec §11: the first image has priority over everything, including
   knowing the rest of the tree. The scanner resolves the path and
   lists the start folder first (HandleStartReady: the first image goes
@@ -1057,6 +1098,8 @@ end;
   here touches the disk (Day 19). }
 procedure TMView.OpenMedia(const APath: string; const ASelectFile: string;
   AKeepCache: Boolean);
+var
+  Recurse: Boolean;
 begin
   FKeepScratch := False;   { StartWithPaste sets it again, after this }
   FClimbing := False;      { ClimbUp sets it again, after this }
@@ -1074,9 +1117,12 @@ begin
   { New lists may name other versions of the files. }
   if not AKeepCache then
     FCache.Clear;
-  { Following Total Commander: its folder only, no subfolders. }
-  FNavigator.Recursive := UseRecursive;
-  FScanGeneration := FScanner.Request(APath, ASelectFile, UseRecursive);
+  { Following Total Commander: its folder only, no subfolders. A drive
+    root: without them too, unless [Navigation] RecurseFromDriveRoot
+    (user, Day 24). }
+  Recurse := UseRecursive and (FConfig.RecurseFromRoot or not OpensDriveRoot(APath));
+  FNavigator.Recursive := Recurse;
+  FScanGeneration := FScanner.Request(APath, ASelectFile, Recurse);
 
   ShowStatus('opening ' + APath + ' ...', 0);
   if not FNavigator.HasCurrentImage then
@@ -1142,6 +1188,15 @@ begin
   end;
 end;
 
+{ "3 videos" (the info line, an empty folder; Day 24). }
+function VideoCountText(ACount: Integer): string;
+begin
+  if ACount = 1 then
+    Result := '1 video'
+  else
+    Result := IntToStr(ACount) + ' videos';
+end;
+
 { Shows the navigator's current file: from the cache if possible,
   otherwise keeps the previous image on screen until it arrives. }
 procedure TMView.ShowCurrent;
@@ -1159,7 +1214,14 @@ begin
     UpdateWanted;               { nothing wanted: stops all jobs }
     FRenderer.SetImage(nil);
     if FNavigator.TreeReady then
-      FRenderer.SetMessage('No images found in   ' + FNavigator.RootDirectory)
+    begin
+      { A folder of videos only: say so, not just "nothing" (Day 24). }
+      if FNavigator.VideoCount > 0 then
+        FRenderer.SetMessage('No images found in   ' + FNavigator.RootDirectory
+          + '   -   ' + VideoCountText(FNavigator.VideoCount) + ' (MView shows images only)')
+      else
+        FRenderer.SetMessage('No images found in   ' + FNavigator.RootDirectory);
+    end
     else
       FRenderer.SetMessage('Looking for images in   ' + FNavigator.RootDirectory + '  ...');
     UpdateInfo;
@@ -1673,6 +1735,15 @@ begin
     FClimbStep := ACommand;
     Exit;
   end;
+  { Following Total Commander: it decides the folder. }
+  if (ACommand in [cmdNextDirectory, cmdPreviousDirectory]) and TCFolderLock then
+  begin
+    TCFolderLocked;
+    Exit;
+  end;
+  { In Total Commander's folder the image steps wrap around inside it
+    instead of climbing out (user, Day 24: "very convenient & free"). }
+  FNavigator.ClimbUp := FConfig.ClimbUp and not TCFolderLock;
   FCommandMs := NowMs;
   FLastStep := ACommand;
   if ACommand in [cmdPreviousImage] then
@@ -2031,57 +2102,100 @@ begin
     Result := AImage.Height;
 end;
 
+{ The info line: its parts in the order [InfoLine] gives, the ones set to
+  0 left out (user, Day 24). The zoom is the renderer's (it changes with
+  every zoom step): a marker (InfoZoomMarker) says where it goes. }
 procedure TMView.UpdateInfo;
 var
-  Text, FileName: string;
+  Text, FileName, Part: string;
+  Items: TInfoItems;
+  I: Integer;
+  Paste: Boolean;
 begin
-  { A pasted image (also when no file is open). }
-  if FShowingPaste and Assigned(FCurrentImage) then
-  begin
-    Text := Format('%s     %d x %d', [FScratchTitle, FCurrentImage.Width, FCurrentImage.Height]);
-    if FPasteSavedAs <> '' then
-      Text := Text + '     saved as ' + FPasteSavedAs
-    else
-      Text := Text + '     not saved (menu: Save image)';
-    Text := Text + FilterMark;
-    if FStatusNote <> '' then
-      Text := Text + '     ' + FStatusNote;
-    FRenderer.InfoText := Text;
-    Exit;
-  end;
-
-  if not FNavigator.HasCurrentImage then
+  Paste := FShowingPaste and Assigned(FCurrentImage);
+  { Nothing open (and no pasted image): no line. }
+  if (not Paste) and not FNavigator.HasCurrentImage then
   begin
     FRenderer.InfoText := '';
     Exit;
   end;
-
-  { Name, size (once the image is there), folder, then the rest
-    (user, Phase F). }
-  FileName := FNavigator.CurrentFileName;
-  Text := ExtractFileName(FileName);
-  if Assigned(FCurrentImage) and not FCurrentImage.IsError
-    and SameText(FCurrentImage.Key.FileName, FileName) then
-    Text := Text + Format('     %d x %d', [ImageWidth(FCurrentImage), ImageHeight(FCurrentImage)]);
-  Text := Text + '     ' + ExtractFileDir(FileName);
-  Text := Text + Format('     %d / %d', [FNavigator.CurrentIndex + 1, FNavigator.ImageCount]);
-
-  if FNavigator.SortMode in [smFileNameAscending, smFileNameDescending] then
-    Text := Text + '     by name'
+  if Paste then
+    FileName := ''
   else
-    Text := Text + '     by date';
+    FileName := FNavigator.CurrentFileName;
 
-  if FSkim then
-    Text := Text + '     skimming'
-  else if FPendingFile <> '' then
-    Text := Text + '     loading ...';
-  if not FNavigator.TreeReady then
-    Text := Text + '     scanning folders ...';
-  if Assigned(FCurrentImage) and (FCurrentImage.FrameCount > 1) then
-    Text := Text + Format('     animated, %d frames', [FCurrentImage.FrameCount]);
-  Text := Text + FilterMark;
-  if FStatusNote <> '' then
-    Text := Text + '     ' + FStatusNote;
+  Text := '';
+  Items := FConfig.InfoItems;
+  for I := 0 to High(Items) do
+  begin
+    Part := '';
+    case Items[I] of
+      iiFileName:
+        if Paste then
+          Part := FScratchTitle
+        else
+          Part := ExtractFileName(FileName);
+      iiDimensions:
+        if Paste then
+          Part := Format('%d x %d', [FCurrentImage.Width, FCurrentImage.Height])
+        else if Assigned(FCurrentImage) and not FCurrentImage.IsError
+          and SameText(FCurrentImage.Key.FileName, FileName) then
+          Part := Format('%d x %d', [ImageWidth(FCurrentImage), ImageHeight(FCurrentImage)]);
+      iiFolder:
+        if not Paste then
+          Part := ExtractFileDir(FileName);
+      iiPosition:
+        if not Paste then
+          Part := Format('%d / %d', [FNavigator.CurrentIndex + 1, FNavigator.ImageCount]);
+      iiVideos:
+        { Videos in this folder: counted, never shown (user, Day 24). }
+        if (not Paste) and (FNavigator.VideoCount > 0) then
+          Part := VideoCountText(FNavigator.VideoCount);
+      iiSorting:
+        if not Paste then
+        begin
+          if FNavigator.SortMode in [smFileNameAscending, smFileNameDescending] then
+            Part := 'by name'
+          else
+            Part := 'by date';
+        end;
+      iiZoom:
+        Part := InfoZoomMarker;
+      iiState:
+        if Paste then
+        begin
+          if FPasteSavedAs <> '' then
+            Part := 'saved as ' + FPasteSavedAs
+          else
+            Part := 'not saved (menu: Save image)';
+        end
+        else
+        begin
+          if FSkim then
+            Part := 'skimming'
+          else if FPendingFile <> '' then
+            Part := 'loading ...';
+          if not FNavigator.TreeReady then
+          begin
+            if Part <> '' then
+              Part := Part + '     ';
+            Part := Part + 'scanning folders ...';
+          end;
+        end;
+      iiAnimation:
+        if Assigned(FCurrentImage) and (FCurrentImage.FrameCount > 1) then
+          Part := Format('animated, %d frames', [FCurrentImage.FrameCount]);
+      iiFilters:
+        Part := Trim(FilterMark);
+      iiMessages:
+        Part := FStatusNote;
+    end;
+    if Part = '' then
+      Continue;
+    if Text <> '' then
+      Text := Text + '     ';
+    Text := Text + Part;
+  end;
 
   FRenderer.InfoText := Text;
 end;
@@ -2273,10 +2387,41 @@ end;
 
 { Browse from the parent of the opened folder: the current image stays
   (it is inside), the folders around it join the tree. }
+function TMView.TCFolderLock: Boolean;
+begin
+  Result := (FFollowMode > 0) and FFollowing;
+end;
+
+procedure TMView.TCFolderLocked;
+begin
+  FlashNotice('TC connection: directory change disabled!');
+end;
+
+procedure TMView.FlashNotice(const AText: string);
+var
+  Style: Integer;
+begin
+  { In the TC label's colour: light blue (its folder) or amber (also its
+    cursor). }
+  if FFollowMode = 1 then
+    Style := 1
+  else
+    Style := 2;
+  FRenderer.SetNotice(AText, Style);
+  FRenderer.NoticeOn := True;
+  FNoticeStartMs := Max(1.0, NowMs);
+  Refresh;
+end;
+
 procedure TMView.ParentFolder;
 var
   Root, Parent: string;
 begin
+  if TCFolderLock then
+  begin
+    TCFolderLocked;
+    Exit;
+  end;
   Root := ExcludeTrailingPathDelimiter(FNavigator.RootDirectory);
   if Root = '' then
     Exit;
@@ -2816,6 +2961,8 @@ end;
 procedure TMView.PumpDeliveries;
 var
   Shot: string;
+  NoticeT: Double;
+  NoticeShown: Boolean;
 begin
   { Debugging saves: report when done. }
   Shot := FRenderer.TakeScreenshotResult;
@@ -2921,6 +3068,29 @@ begin
       if FAutoOn then
         ApplyAuto(False);
       UpdateFilterPanel;
+    end;
+  end;
+
+  { The notice in the middle: two short flashes, then steady, then gone. }
+  if FNoticeStartMs > 0 then
+  begin
+    NoticeT := NowMs - FNoticeStartMs;
+    if NoticeT >= NoticeMs then
+    begin
+      FNoticeStartMs := 0;
+      FRenderer.NoticeOn := False;
+      FRenderer.SetNotice('');
+      Refresh;
+    end
+    else
+    begin
+      NoticeShown := not (((NoticeT >= 180) and (NoticeT < 300))
+        or ((NoticeT >= 480) and (NoticeT < 600)));
+      if NoticeShown <> FRenderer.NoticeOn then
+      begin
+        FRenderer.NoticeOn := NoticeShown;
+        Refresh;
+      end;
     end;
   end;
 
@@ -3129,13 +3299,13 @@ begin
     omUp:
       begin
         Result := True;
-        { A swipe to the right over a button: into its folder (Day 21,
-          user). Else it acts on release, where it was pressed (like a
-          button). }
+        { A swipe over a button, to the right (Day 21, user) or to the
+          left (Day 24, user): into its folder. Else it acts on release,
+          where it was pressed (like a button). }
         Hit := FPanel.HitTest(AX, AY);
         if (FPanelPress.Part in [ppSlot, ppSlotMenu])
-          and (AX - FPanelPressX >= Round(SwipePx * Max(1.0, FPanelScale)))
-          and (Abs(AY - FPanelPressY) < AX - FPanelPressX) then
+          and (Abs(AX - FPanelPressX) >= Round(SwipePx * Max(1.0, FPanelScale)))
+          and (Abs(AY - FPanelPressY) < Abs(AX - FPanelPressX)) then
           OpenSlotFolder(FPanelPress.Slot)
         else if (FPanelPress.Part <> ppNone) and (Hit.Part = FPanelPress.Part)
           and (Hit.Slot = FPanelPress.Slot) then
@@ -3172,7 +3342,7 @@ begin
     ppSlotMenu, ppAdd:
       if Assigned(FOnSortMenu) and Assigned(FSurface) then
       begin
-        P := FSurface.ClientToScreen(Point(FPanel.Left, 0));
+        P := FSurface.ClientToScreen(Point(FPanel.PanelLeft, 0));
         P.Y := Mouse.CursorPos.Y;
         if AHit.Part = ppAdd then
           FOnSortMenu(-1, P)
@@ -4523,8 +4693,14 @@ end;
 
 function TMView.CanApplyFilters: Boolean;
 begin
-  Result := (not FiltersNeutral(FFilters)) and Assigned(FCurrentImage)
+  { Filters, or a turn only (Day 24: the copy takes the rotation too). }
+  Result := ((not FiltersNeutral(FFilters)) or ViewRotated) and Assigned(FCurrentImage)
     and not FCurrentImage.IsError;
+end;
+
+function TMView.ViewRotated: Boolean;
+begin
+  Result := FRenderer.View.Angle <> 0;
 end;
 
 { The filters into the pixels of a copy, shown like a crop (Save / Save
@@ -4533,8 +4709,8 @@ end;
 procedure TMView.ApplyFiltersToCopy;
 var
   Img, Copied: IDecodedImage;
-  Bmp: TBGRABitmap;
-  FullW, FullH: Integer;
+  Bmp, Turned: TBGRABitmap;
+  FullW, FullH, SrcW, SrcH: Integer;
   Angle: Double;
   Key: TImageKey;
   Reason, SourceName, Suffix, Note: string;
@@ -4542,7 +4718,7 @@ var
 begin
   if not CanApplyFilters then
   begin
-    ShowStatus('apply filters: no filter is set', 3000);
+    ShowStatus('apply filters: no filter is set, and the image is not turned', 3000);
     Exit;
   end;
   Img := BestPixels;
@@ -4564,12 +4740,40 @@ begin
     FullH := Img.Bitmap.Height;
   end;
 
+  Angle := FRenderer.View.Angle;
   { A large image takes a second or so (every pixel). }
   OldCursor := Screen.Cursor;
   Screen.Cursor := crHourGlass;
   try
     Bmp := Img.Bitmap.Duplicate as TBGRABitmap;
     ApplyFiltersToBitmap(Bmp, FFilters, True);
+    { The rotation too (user, Day 24), after the mirror, as on screen;
+      the corners of an oblique turn black. }
+    if Angle <> 0 then
+    begin
+      SrcW := Bmp.Width;
+      SrcH := Bmp.Height;
+      Turned := RotatedBitmap(Bmp, Angle, BGRABlack);
+      Bmp.Free;
+      Bmp := Turned;
+      if Abs(Angle - 90.0 * Round(Angle / 90.0)) < 0.01 then
+      begin
+        { A quarter turn: the full size exactly (swapped if odd). }
+        if Odd(Round(Angle / 90.0)) then
+        begin
+          SrcW := FullW;
+          FullW := FullH;
+          FullH := SrcW;
+        end;
+      end
+      else
+      begin
+        { Oblique: the full size grows with the picture (a quick view is
+          smaller than the full image). }
+        FullW := Max(1, Round(Bmp.Width * FullW / SrcW));
+        FullH := Max(1, Round(Bmp.Height * FullH / SrcH));
+      end;
+    end;
   finally
     Screen.Cursor := OldCursor;
   end;
@@ -4579,6 +4783,8 @@ begin
   else
     SourceName := ChangeFileExt(ExtractFileName(FCurrentImage.Key.FileName), '');
   Suffix := FilterSuffix(FFilters);
+  if Angle <> 0 then
+    Suffix := Suffix + Format('_rot%d', [Round(Angle)]);
   Key.FileName := SourceName + Suffix;
   Key.FileSize := 0;
   Key.FileTime := Now;
@@ -4586,7 +4792,6 @@ begin
   Note := '';
   if Img.Quality < qlFull then
     Note := '  (from the quick view: the full image wasn''t loaded yet)';
-  Angle := FRenderer.View.Angle;
   { The copy has the filters in its pixels: shown without them (Auto
     ends; locked filters come back with the next file). }
   if FAutoOn then
@@ -4603,10 +4808,13 @@ begin
     FRestorePending := True;
   end;
   SetFilters(NeutralFilters);
-  ShowStatus('filters applied to a copy (shown unfiltered now): Save image or the sort panel '
-    + 'writes it', 6000);
+  { The copy has the turn in its pixels: shown unturned. }
   if Angle <> 0 then
-    FRenderer.RotateBy(Angle);
+    ShowStatus('filters and rotation applied to a copy (shown unfiltered and upright now): '
+      + 'Save image or the sort panel writes it', 6000)
+  else
+    ShowStatus('filters applied to a copy (shown unfiltered now): Save image or the sort panel '
+      + 'writes it', 6000);
   UpdateInfo;
   Refresh;
 end;
@@ -4843,6 +5051,31 @@ begin
   if (FIcons = nil) or not FIcons.Loaded then
     Exit;
   Result := FIcons.Bitmap(SlotIconFile(ASlot), ASize);
+end;
+
+{ The large preview beside the panel (user, Day 24): the icon at its own
+  size, at least IconPreviewMin (a small icon is shown enlarged), at most
+  AMaxSize; nil if the slot has no icon. }
+function TMView.PanelSlotPreview(ASlot, AMaxSize: Integer; out ACaption: string): TBGRABitmap;
+const
+  IconPreviewMin = 128;
+var
+  Path: string;
+  Native, Size: Integer;
+begin
+  Result := nil;
+  ACaption := '';
+  if (FIcons = nil) or not FIcons.Loaded then
+    Exit;
+  Path := SlotIconFile(ASlot);
+  if (Path = '') or not FIcons.Has(Path) then
+    Exit;
+  Native := FIcons.NativeSize(Path);
+  Size := Min(Max(Native, IconPreviewMin), AMaxSize);
+  Result := FIcons.Bitmap(Path, Size);
+  if Result = nil then
+    Exit;
+  { The picture alone, no caption (user, Day 24). }
 end;
 
 function TMView.PanelSlotMissing(ASlot: Integer): Boolean;

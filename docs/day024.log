@@ -1,0 +1,158 @@
+MView Day 24 (2026-10-05)
+=========================
+
+Microscope files (looked at, nothing built yet)
+-----------------------------------------------
+The SP8 files in test\images\Microscope images are LAS X "export with
+overlays" TIFFs: 8-bit RGB with the colour table applied and the 25 um
+bar and time stamp drawn into the pixels. Their only size fields say
+72 dpi in every file, whatever the image size (a placeholder): no pixel
+size and no Leica data in them. The drawn bars give a check: Series084
+(1024 px) 25 um = 191 px = 0.131 um/px; Glu...Image003 (2464 px) 290 px
+= 0.086 um/px. The calibration is in the .lif / .lei (or a raw-data
+export's MetaData XML). The user is getting the .lei files; measurement,
+scale bar and metadata wait for them. Plan in specs\wanted features.txt
+(user's draft).
+
+Icon preview beside the sort panel (user)
+-----------------------------------------
+"if, in the right menu panel, the mouse is above a directory AND an icon
+is assigned, display a larger version, if appropriate the original icon
+size ... in a small picture to the left of the side bar."
+- TSortPanel: OnSlotPreview; while a button with an icon is hovered, the
+  panel and a box with the icon become one picture (FOut), FPreviewW
+  wider on the left; Left moves left, hit tests and the folder menu use
+  the new PanelLeft. The box takes no clicks.
+- Size: the icon's own size (TSortIcons.NativeSize: the largest picture
+  in the .ico, or the .png's), at least 128 px, at most 256 px (scaled
+  for the screen) and what fits; under it the file name and own size.
+- Review (independent) before delivery: compiles as far as can be told;
+  two small fixes (no preview when there is room for less than 96 px;
+  the box's frame on whole pixels, corners scaled).
+Units changed: uSortPanel, uSortIcons, uMView. Spec §9.7.
+
+Icon preview, second round (user)
+---------------------------------
+"(1) remove numbers from icons in the list (2) remove the text under the
+enlarged icon ... show only the image (3) the enlarged icon ... should
+always be displayed at the top of the screen. (4) the mouse swipe over
+the directory ... should be both left->right and right->left"
+- No number badge on a button's icon (the coloured folder shape without
+  an icon keeps its number). The preview: the picture only, at the top
+  of the view (it no longer moves with the hovered button).
+- A swipe left or right over a button opens its folder (same 40 px,
+  more sideways than up / down); menu text and the bottom line say so.
+Units changed: uSortPanel, uMView, umainform. Spec §9.7.
+
+Videos in 1.0 (user)
+--------------------
+Movies go to the microscopy edition; MView 1.0 ignores them but shows
+that they are there: "the info line video count is a good idea".
+- uImageFormats.IsVideoFile (by extension only, never opened);
+  TDirectoryImages.VideoCount (Scan, the tree scan's AddVideo, Assign);
+  TNavigator.VideoCount. Info line: "12 / 40  -  3 videos"; a folder
+  with videos only: "No images found in ... - 5 videos (MView shows
+  images only)". A note when Total Commander's cursor is on a video was
+  dropped (user: Total Commander opens videos with their program).
+Units changed: uImageFormats, uDirectoryImages, uDirectoryTree,
+uNavigator, uMView.
+
+Folder steps while following Total Commander (user)
+---------------------------------------------------
+"when TC mode is on, the mouse gestures left/right do not work (on
+purpose). this can be frustrating ... a briefly flashing message,
+something like 'TC connection, directory change disabled!'"
+- TMView.TCFolderLock (following and Total Commander runs): next /
+  previous folder, the parent folder and climbing out at the end of the
+  folder are refused; FlashNotice shows "TC connection: directory
+  change disabled!" in the middle, in the TC label's colour, two short
+  flashes then steady, gone after 1.8 s (PumpDeliveries times it).
+- TRenderer.SetNotice / NoticeBitmap / NoticeOn, drawn by both
+  renderers next to the badge code.
+- Review (independent): compiles as far as can be told. Noted: with
+  ClimbUp on, a step past the last image in a followed folder now
+  flashes the notice (it would have climbed) and does not wrap around.
+Units changed: uRenderer, uGLRenderer, uMView. Spec §9.7.
+
+Wrap in a followed folder (user)
+--------------------------------
+"no, please leave the wrap in a followed folder. that is very convenient
+& free." While following Total Commander the navigator's ClimbUp is off
+(Navigate sets it each step), so a step past the last image wraps around
+inside the folder; no notice for it. Folder steps still flash the notice.
+Units changed: uMView.
+
+The info line's parts in the ini (user)
+---------------------------------------
+"text font, a list of items displayed in the status bar with 0/1 ...
+the order of these entries should be the order in which they appear in
+the status line. the entries =0 are just omitted."
+- [InfoLine]: Font, FontSize (points; info line only), then FileName,
+  Dimensions, Folder, Position, Videos, Sorting, Zoom, State, Animation,
+  Filters, Messages, each 1 / 0, shown in the order of their lines
+  (TConfig.ReadInfoLine reads the section's keys in file order; Save
+  writes existing keys in place, new ones at the end).
+- TMView.UpdateInfo builds the line from TConfig.InfoItems; the zoom
+  ("52 % = W x H", angle) is the renderer's, so TMView puts
+  InfoZoomMarker where it goes and TRenderer.InfoLine fills it in.
+- Both renderers draw the info line in its own font (CPU: canvas font;
+  GL: UpdateBar with the font, the bar's key includes it).
+Units changed: uConfig, uMView, uRenderer, uGLRenderer. Spec §8.6, §14.
+
+The rotation in "Apply filters to a copy" (user)
+------------------------------------------------
+"the right menu entry 'apply filters to a copy' should also transfer
+the rotation state."
+- The copy is turned in its pixels after the filters and the mirror:
+  quarter turns exactly (RotateCW / CCW / 180), other angles bilinear
+  on a larger canvas with black corners (uFilterImage.RotatedBitmap,
+  clockwise as on screen); the full size follows (swapped for odd
+  quarter turns). Name: ..._rot90; shown upright afterwards (before, the
+  view was only turned again). Enabled also for a turn alone; the menu
+  says "Apply filters and rotation to a copy" while the view is turned.
+Units changed: uFilterImage, uMView, umainform. Spec §9.8.
+
+Bug: a sort folder "C:\" opened MView's own folder (user)
+----------------------------------------------------------
+"i created the side folder 'c:\' ... if i gesture to change into the dir,
+i get 'No images found in c:\projects\mview\build'"
+- Folders are kept without their trailing backslash, so the drive root
+  became "C:"; ExpandFileName("C:") is the current folder on drive C
+  (MView's build folder), not the root. TNavigator.FullPath: a bare
+  drive gets its backslash before ExpandFileName; used where a path
+  comes in (TNavigator.OpenPath, TDirectoryScanner.Resolve).
+Units changed: uNavigator, uDirectoryScanner.
+
+No subfolders from a drive root (user)
+--------------------------------------
+"this calls imho for an ini setting to limit this behaviour ... 'do not
+recurse from root'. this should also apply when the recursion 'climb up'
+reaches root"
+- [Navigation] RecurseFromDriveRoot=0 (default): a drive root (C:\, or a
+  network share's root \\server\share), or an image directly in one, is
+  opened without its subfolders even with Recursive=1; 1 = as any other
+  folder. Decided in TMView.OpenMedia (OpensDriveRoot, by the name only),
+  so it holds for every way in: a sort folder, the command line, Total
+  Commander, the parent-folder command, and climbing (which already
+  stops one level below the drive).
+Units changed: uConfig, uMView. Spec §14.
+
+Release 1.0 (user: "i think i am now ready for the push to version 1.0 ... this is a milestone")
+-----------------------------------------------------------------------------------------------
+- Decided today: the viewer is complete and its feature set frozen; 1.x gets
+  fixes. Microscopy (metadata, calibration, measuring, scale bar, provenance
+  note), movies and camera recordings, editing (Photoshop .8bf, Fiji through
+  Fiji) go into a microscopy edition: a second program from the same source
+  tree (own .lpr / .lpi, units in source\microscopy\), not a fork.
+- About box: "Versarite MView 1.0", the microscopy edition named; the
+  dedication line unchanged.
+- readme.md rewritten for 1.0 (what 1.0 brings, the microscopy edition);
+  docs\release_notes_v1.0.0.md; spec: release note at the top, roadmap rows
+  "Release 1.0" and "Microscopy edition".
+- docs\architecture: both pictures drawn again from the source (49 units,
+  134 uses; NEW tags for the units and threads since Day 19: sorting,
+  filters, Total Commander, single instance, file mover and icon loader
+  threads), MView_Architecture.md / .docx updated.
+- Copied to C:\projects\GIT\Versarite MView (sources changed since v0.21,
+  docs, specs); the GIT folder's own .gitignore kept.
+Units changed: umainform.

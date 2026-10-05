@@ -484,3 +484,22 @@ The general viewer is done (user, Day 23); what is left is microscopy-specific:
 | 21 | Filters, keeping them (Day 21) | "Lock filters" toggle in the right-click menu; unlocked, the next image is unfiltered. |
 | 22 | Filter panel (Day 21) | Opens by resting at the left edge; pin remembered in MView.ini. |
 | 23 | Total Commander side by side (Day 21) | Carried over: from the right-click menu; built next, before G6. |
+
+# After Phase G: release 1.0 and the microscopy edition (Day 24)
+
+G1, G4 and G6 are built and released with **Versarite MView 1.0** (2026-10-05). The remaining
+microscopy items — G2 metadata, G3 scale bar, G5 measuring, calibration per objective, the
+provenance note — and the later wishes (movies and camera recordings, Photoshop .8bf filters, Fiji
+through Fiji, editing with the keyboard) move to the **microscopy edition**: a second program built
+from the same source tree, with its own project file and its units in `source\microscopy\`. MView
+itself keeps its frozen feature set and gets fixes. The plan for the microscopy edition, as agreed
+with the user on Day 24:
+
+| # | Item | Decision so far |
+|---|---|---|
+| M1 | Leica files | Read the .lif / .lei XML (pixel size, objective, channels, times); LAS X exports find their project file (`221119_Image017.tif` → `221119.lif`, element "Image017"). The test exports carry no scale (72 dpi placeholder, scale bar burned in). |
+| M2 | Calibration | Named calibrations per objective, by numbers or by measuring a known object; stored with the image width; a scale from the file always wins. |
+| M3 | Measuring | Menu entry "Measurement", enabled only with a calibration; first click starts a straight line that follows the mouse, second click ends it; µm and px. |
+| M4 | Scale bar | Menu entry "Draw scale bar"; horizontal, follows the mouse, length snaps to round values, wheel = thickness, third click finishes; into a saved copy. |
+| M5 | Movies | Frame stacks with time stamps; raw AVI and TIFF stacks own, compressed video through FFmpeg's libraries. |
+| M6 | Editing | Photoshop .8bf host (64-bit), Fiji / ImageJ through Fiji (headless macros); keyboard allowed. |
