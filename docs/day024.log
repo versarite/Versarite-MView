@@ -156,3 +156,40 @@ Release 1.0 (user: "i think i am now ready for the push to version 1.0 ... this 
 - Copied to C:\projects\GIT\Versarite MView (sources changed since v0.21,
   docs, specs); the GIT folder's own .gitignore kept.
 Units changed: umainform.
+
+After the release: [Startup] Mode (a user's request, via the author)
+--------------------------------------------------------------------
+"apparently the best start-up mode is side by side with tc ... instead of
+Fullscreen=0/1 ... Mode=0/1/2; 0: start with ini [default], 1: start full
+screen with last dir (fallback program dir), 2: start side by side with TC."
+- [Startup] Mode replaces StartFullscreen (StartFullscreen=1 becomes Mode=1,
+  the old key is removed at the next save). 0 = as before; 1 = without a
+  file the viewer fullscreen in the last session (none: MView's own
+  folder), with a file fullscreen; 2 = the same, then side by side with
+  Total Commander in the start folder (queued until the window is up).
+- TConfig.StartMode / StartFullscreen / StartsViewer; TMainForm.FormCreate
+  decides settings screen or viewer; FormShow starts, StartSideBySide;
+  ToggleSideBySide takes the start folder when no image is shown yet.
+Units changed: uConfig, umainform. Spec §11, §14.
+
+The welcome picture (user)
+--------------------------
+"as a startup help for the new user, can you annotate a screenshot of the
+mview program window, explaining the main elements? that would show if a
+new ini is generated and the viewer starts in the program dir."
+- MView_welcome.png (1920 x 1080): the user's screenshot (info line off,
+  both panels pinned, icon preview showing) with numbered badges and
+  boxes: filters, sort panel, the four zones, icon preview; the mouse
+  "everywhere" (wheel, double-click, gestures, tilt, side buttons, right
+  click), Esc, Ctrl+Alt+Shift+Q. Kept in docs\ and next to MView.exe
+  (build\); goes into the release zip.
+- The very first start (no MView.ini, no file given, the picture next to
+  MView.exe): the viewer opens it, without subfolders
+  (TMView.Start(Path, AFlat)); otherwise as before. MView's own folder
+  as the Mode 1 / 2 fallback is also opened without subfolders.
+Units changed: umainform, uMView. Spec §11.
+- Defaults changed (user): [Startup] Mode=1 (the viewer fullscreen) and
+  [Sort] FollowTotalCommander=0 (off): following a running Total Commander
+  at the first start would replace the welcome picture with its folder.
+- Version 1.0.1 for the Git update: About box, readme (status, the first
+  start, [Startup] Mode), docs\release_notes_v1.0.1.md.

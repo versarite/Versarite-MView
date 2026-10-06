@@ -417,6 +417,9 @@ type
     { Climbing (Day 22, [Navigation] ClimbUp): the step that ran into the
       end of the tree, done again once the parent's tree has arrived. }
     FClimbing: Boolean;
+    { The next OpenMedia without subfolders (Start with AFlat: MView's own
+      folder or the welcome picture, Day 24). }
+    FOpenFlat: Boolean;
     FClimbStep: TCommand;
     FClimbGeneration: Cardinal;
     FClimbSinceMs: Double;
@@ -591,7 +594,9 @@ type
 
     { Startup (spec §11): AParam is the first command line argument,
       a file or a folder. Empty: resume the last session. }
-    procedure Start(const AParam: string);
+    { AFlat: without subfolders (MView's own folder, the welcome picture:
+      a recursive start would scan the folder above it). }
+    procedure Start(const AParam: string; AFlat: Boolean = False);
 
     { Opens a file or a folder (through the scanner). ASelectFile: a
       file inside the folder to start on (resuming the last session). }
@@ -1059,16 +1064,20 @@ begin
   FSizeChangedMs := NowMs;
 end;
 
-procedure TMView.Start(const AParam: string);
+procedure TMView.Start(const AParam: string; AFlat: Boolean);
 begin
+  FOpenFlat := AFlat;
   if AParam <> '' then
     OpenMedia(AParam)
   else if FConfig.LastDirectory <> '' then
     OpenMedia(FConfig.LastDirectory, FConfig.LastFile)   { the scanner says if it's gone }
   else
+  begin
     { No last session (the settings editor's "View images" on a new
       installation). }
+    FOpenFlat := False;
     ShowMessageText(NoStartMessage);
+  end;
 end;
 
 { APath opens a drive root (a folder like C:\ or \\server\share, or an
@@ -1120,7 +1129,9 @@ begin
   { Following Total Commander: its folder only, no subfolders. A drive
     root: without them too, unless [Navigation] RecurseFromDriveRoot
     (user, Day 24). }
-  Recurse := UseRecursive and (FConfig.RecurseFromRoot or not OpensDriveRoot(APath));
+  Recurse := UseRecursive and (FConfig.RecurseFromRoot or not OpensDriveRoot(APath))
+    and not FOpenFlat;
+  FOpenFlat := False;
   FNavigator.Recursive := Recurse;
   FScanGeneration := FScanner.Request(APath, ASelectFile, Recurse);
 

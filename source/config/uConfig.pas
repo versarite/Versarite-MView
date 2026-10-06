@@ -95,7 +95,7 @@ type
     FOpenLastSession : Boolean;
     FLastDirectory   : string;
     FLastFile        : string;
-    FStartFullscreen : Boolean;
+    FStartMode       : Integer;
     FOnlyOneInstance : Boolean;
 
     { Window }
@@ -219,7 +219,16 @@ type
     property OpenLastSession : Boolean read FOpenLastSession;
     property LastDirectory   : string  read FLastDirectory write FLastDirectory;
     property LastFile        : string  read FLastFile write FLastFile;
-    property StartFullscreen : Boolean read FStartFullscreen;
+    { How MView starts (Day 24, a user's request; replaces
+      StartFullscreen): 0 = as before: without a file the settings
+      screen, with one the viewer in a window; 1 = the viewer fullscreen,
+      without a file in the last session's folder (none: MView's own
+      folder); 2 = the same, side by side with Total Commander. }
+    property StartMode       : Integer read FStartMode;
+    { The viewer starts fullscreen (StartMode 1). }
+    function StartFullscreen: Boolean;
+    { Started without a file, the viewer comes first (StartMode 1, 2). }
+    function StartsViewer: Boolean;
     { A second MView hands its file or folder to the one running and ends
       (user, Day 23: opening from Total Commander). }
     property OnlyOneInstance : Boolean read FOnlyOneInstance;
@@ -419,7 +428,8 @@ const
   KEY_OPEN_LAST_SESSION = 'OpenLastSession';
   KEY_LAST_DIRECTORY    = 'LastDirectory';
   KEY_LAST_FILE         = 'LastFile';
-  KEY_START_FULLSCREEN  = 'StartFullscreen';
+  KEY_START_FULLSCREEN  = 'StartFullscreen';   { before Day 24; read once, then removed }
+  KEY_START_MODE        = 'Mode';
   KEY_ONLY_ONE_INSTANCE = 'OnlyOneInstance';
   KEY_LEFT              = 'Left';
   KEY_TOP               = 'Top';
@@ -499,7 +509,7 @@ begin
   FOpenLastSession := True;
   FLastDirectory   := '';
   FLastFile        := '';
-  FStartFullscreen := False;
+  FStartMode       := 1;      { Day 24 (user): fullscreen viewer by default }
   FOnlyOneInstance := True;
 
   FLeft := 0;
@@ -556,7 +566,7 @@ begin
   FDeletedFolder   := '';
   FIconFolder      := '';
   FTotalCommander  := '';
-  FFollowTC        := 1;
+  FFollowTC        := 0;      { Day 24 (user): off by default }
   FFilterPinned    := False;
   FAutoFilter      := True;
   FLensMagPercent  := 300;
@@ -593,7 +603,14 @@ begin
     FOpenLastSession := Ini.ReadBool(SEC_STARTUP, KEY_OPEN_LAST_SESSION, FOpenLastSession);
     FLastDirectory   := Ini.ReadString(SEC_STARTUP, KEY_LAST_DIRECTORY, FLastDirectory);
     FLastFile        := Ini.ReadString(SEC_STARTUP, KEY_LAST_FILE, FLastFile);
-    FStartFullscreen := Ini.ReadBool(SEC_STARTUP, KEY_START_FULLSCREEN, FStartFullscreen);
+    { Mode replaces StartFullscreen: an old StartFullscreen=1 becomes
+      Mode=1 (the key goes at the next save). }
+    if Ini.ValueExists(SEC_STARTUP, KEY_START_MODE) then
+      FStartMode := Ini.ReadInteger(SEC_STARTUP, KEY_START_MODE, FStartMode)
+    else if Ini.ReadBool(SEC_STARTUP, KEY_START_FULLSCREEN, False) then
+      FStartMode := 1;
+    if (FStartMode < 0) or (FStartMode > 2) then
+      FStartMode := 0;
     FOnlyOneInstance := Ini.ReadBool(SEC_STARTUP, KEY_ONLY_ONE_INSTANCE, FOnlyOneInstance);
 
     FLeft   := Ini.ReadInteger(SEC_WINDOW, KEY_LEFT, FLeft);
@@ -682,7 +699,8 @@ begin
     Ini.WriteBool(SEC_STARTUP, KEY_OPEN_LAST_SESSION, FOpenLastSession);
     Ini.WriteString(SEC_STARTUP, KEY_LAST_DIRECTORY, FLastDirectory);
     Ini.WriteString(SEC_STARTUP, KEY_LAST_FILE, FLastFile);
-    Ini.WriteBool(SEC_STARTUP, KEY_START_FULLSCREEN, FStartFullscreen);
+    Ini.WriteInteger(SEC_STARTUP, KEY_START_MODE, FStartMode);
+    Ini.DeleteKey(SEC_STARTUP, KEY_START_FULLSCREEN);
     Ini.WriteBool(SEC_STARTUP, KEY_ONLY_ONE_INSTANCE, FOnlyOneInstance);
 
     if FWidth > 0 then
@@ -855,6 +873,16 @@ begin
   end;
 end;
 
+function TConfig.StartFullscreen: Boolean;
+begin
+  Result := FStartMode = 1;
+end;
+
+function TConfig.StartsViewer: Boolean;
+begin
+  Result := FStartMode in [1, 2];
+end;
+
 function TConfig.DeletedFilesFolder: string;
 begin
   if FDeletedFolder <> '' then
@@ -886,8 +914,12 @@ const
      Text: 'Folder of the last session (written by MView on exit).'),
     (Section: SEC_STARTUP; Key: KEY_LAST_FILE;
      Text: 'Image of the last session (written by MView on exit).'),
-    (Section: SEC_STARTUP; Key: KEY_START_FULLSCREEN;
-     Text: '1 = the viewer starts fullscreen (Enter switches).'),
+    (Section: SEC_STARTUP; Key: KEY_START_MODE;
+     Text: 'How MView starts:' + LineEnding +
+           '  0  without a file this settings screen, with a file the viewer in a window' + LineEnding +
+           '  1  (default) the viewer fullscreen; without a file in the last session''s folder (none: MView''s own folder)' + LineEnding +
+           '  2  like 1, side by side with Total Commander (MView left, Total Commander right, in that folder)' + LineEnding +
+           'Enter switches fullscreen; Esc in the viewer comes back here.'),
     (Section: SEC_WINDOW; Key: KEY_LEFT;
      Text: 'Window position when not fullscreen (written by MView when the window is moved or closed).'),
     (Section: SEC_WINDOW; Key: KEY_TOP;
@@ -1049,8 +1081,8 @@ begin
     if SameText(AKey, KEY_ICON_FOLDER) then
       Exit('Folder with .ico / .png icons for the sort panel. Empty = "icons" next to MView.exe.');
     if SameText(AKey, KEY_FOLLOW_TC) then
-      Exit('Follow Total Commander: 0 = no; 1 = when its active panel changes folder, MView opens '
-        + 'that folder (default); 2 = also the image under its cursor (MView as Total Commander''s '
+      Exit('Follow Total Commander: 0 = no (default); 1 = when its active panel changes folder, MView opens '
+        + 'that folder; 2 = also the image under its cursor (MView as Total Commander''s '
         + 'viewer). Also in the right-click menu.');
     if SameText(AKey, KEY_TOTAL_COMMANDER) then
       Exit('Total Commander (TOTALCMD64.EXE) for "Side by side". Empty = found by MView.');

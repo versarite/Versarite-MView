@@ -1,4 +1,4 @@
-# Versarite MView 1.0
+# Versarite MView 1.0.1
 ## Written with support from Claude/Opus5.5 and ChatGPT
 
 A fast native Windows image viewer, driven by the mouse. Made at the microscope bench, for
@@ -7,7 +7,7 @@ By [Versarite](https://github.com/versarite). Free software under the GNU GPL v3
 Pascal/Lazarus is underappreciated. It is powerful and beautiful at the same time, but
 not documented well enough. Claude and ChatGPT helped me greatly to unlock the capabilities.
 
-**Status: release 1.0 (2026-10-05).** After 24 development days and weeks of daily use, the viewer is
+**Status: release 1.0.1 (2026-10-05).** After 24 development days and weeks of daily use, the viewer is
 complete. Its feature set is frozen; 1.x brings fixes and polish. Microscopy-specific work continues
 in a separate **microscopy edition** (see [What comes next](#what-comes-next-the-microscopy-edition)).
 
@@ -122,8 +122,11 @@ Planned for it:
 
 ## Using it
 
-- Start `MView.exe` with a file or folder, or drop one on the window.
-  Started without one, it shows the settings screen.
+- The very first start shows `MView_welcome.png`, a map of the screen (keep it next to
+  `MView.exe`; it is in `docs\`).
+- Start `MView.exe` with a file or folder, or drop one on the window. Without one,
+  `[Startup] Mode` decides: 1 (default) the viewer fullscreen in the last folder, 2 the same side
+  by side with Total Commander, 0 the settings screen.
 - The mouse profile `Default.mouse` says what each button, wheel, gesture and zone does.
   `mouse\Hamana.mouse` gives MView Hamana's mouse: copy it next to `MView.ini` first,
   then set `Profile=Hamana.mouse` under `[Mouse]` (`Profile=Default.mouse` goes back).
@@ -191,7 +194,7 @@ Tested with Total Commander 11.03 (64-bit).
   (updated for 1.0)
 - `docs\dayNNN.log` — the development log, one file per day
 - `docs\Strategy_Phase_G.md` — the plan for sorting, metadata, magnifier and filters
-- `docs\release_notes_*.md` — what each release brings; `release_notes_v1.0.0.md` for this one
+- `docs\release_notes_*.md` — what each release brings (`release_notes_v1.0.0.md`, `release_notes_v1.0.1.md`)
 - `docs\Hamana_Research.md`, `docs\Hamana_Commands.md` — what was learned from Hamana
 - `docs\From_Hamana_to_MView.md` — the homage: what MView kept, what it changed, and why
 

@@ -198,6 +198,12 @@ type
     { Only one instance (Day 23): a path handed over by a second MView,
       opened right after its message (not inside it: it waits). }
     FHandedOverPath: string;
+    { [Startup] Mode=2 (Day 24): the folder Total Commander is sent to
+      when MView starts side by side with it. }
+    FStartFolder: string;
+    { The very first start (no MView.ini yet, no file given): the welcome
+      picture next to MView.exe, shown in the viewer (Day 24); '' = no. }
+    FWelcome: string;
     FStarted: Boolean;
     FFullscreen: Boolean;
     FNormalBounds: TRect;
@@ -270,7 +276,10 @@ type
     procedure HandleResizeMenuClick(Sender: TObject);
     procedure HandleMagnifierMenuClick(Sender: TObject);
     procedure HandleFollowMenuClick(Sender: TObject);
-    procedure ToggleSideBySide;
+    { AFolder: Total Commander's folder when no image is shown yet (the
+      start, [Startup] Mode=2); '' = the current image's. }
+    procedure ToggleSideBySide(const AFolder: string = '');
+    procedure StartSideBySide(AData: PtrInt);
     procedure PlaceTotalCommander(AWindow: THandle);
     procedure CheckSideBySideWait;
     procedure SetSlotIcon(ASlot: Integer; const AFile: string);
@@ -311,7 +320,7 @@ uses
 const
   { The About box: what MView is, and where it comes from. }
   AboutText =
-    'Versarite MView 1.0' + LineEnding +
+    'Versarite MView 1.0.1' + LineEnding +
     'A fast image viewer, driven by the mouse.' + LineEnding +
     'Its microscopy edition (measuring, metadata, editing) follows as a branch of its own.' + LineEnding +
     LineEnding +
@@ -334,11 +343,45 @@ const
   { A stored window smaller than this is ignored. }
   MinWindowWidth = 200;
   MinWindowHeight = 150;
+  { The map of the screen, shown at the very first start (Day 24). }
+  WelcomeFileName = 'MView_welcome.png';
   { The window place is saved this long after the last move / resize
     (viewer; the settings editor saves it on close). }
   BoundsSaveDelayMs = 1000;
 
 { TMainForm }
+
+{ The very first start: MView.ini isn't there yet (it is made right
+  after) and MView_welcome.png is next to MView.exe: its path, else ''. }
+function WelcomeForFirstStart: string;
+var
+  Dir: string;
+begin
+  Result := '';
+  Dir := ExtractFilePath(ParamStr(0));
+  if (ParamCount = 0) and not FileExists(Dir + 'MView.ini')
+    and FileExists(Dir + WelcomeFileName) then
+    Result := Dir + WelcomeFileName;
+end;
+
+{ [Startup] Mode is 1 or 2 (read before any window is made). }
+function StartsWithViewer: Boolean;
+var
+  Config: TConfig;
+begin
+  Result := False;
+  Config := TConfig.Create;
+  try
+    try
+      Config.Load;
+      Result := Config.StartsViewer;
+    except
+      { Unreadable ini: as before, the settings screen. }
+    end;
+  finally
+    Config.Free;
+  end;
+end;
 
 procedure TMainForm.FormCreate(Sender: TObject);
 begin
@@ -372,11 +415,16 @@ begin
   OnKeyDown := @HandleFormKeyDown;
   OnKeyUp := @HandleFormKeyUp;
 
-  if ParamCount >= 1 then
+  { [Startup] Mode (Day 24): 0 = without a file the settings screen;
+    1 / 2 = the viewer first (fullscreen / side by side). }
+  { Before anything makes MView.ini: is this the very first start? }
+  FWelcome := WelcomeForFirstStart;
+  if (ParamCount >= 1) or (FWelcome <> '') or StartsWithViewer then
     CreateViewer
   else
     ShowEditor;
 end;
+
 
 { Everything the viewer needs; FormShow (or the editor) starts it. }
 procedure TMainForm.CreateViewer;
@@ -920,6 +968,9 @@ begin
 end;
 
 procedure TMainForm.FormShow(Sender: TObject);
+var
+  Path: string;
+  Flat: Boolean;
 begin
   if FMView = nil then
   begin
@@ -939,8 +990,42 @@ begin
   FStarted := True;
 
   { Spec §11: a file or folder on the command line. (Without one the
-    editor came first, and its "View images" started the viewer.) }
-  FMView.Start(ParamStr(1));
+    editor came first, and its "View images" started the viewer;
+    [Startup] Mode 1 / 2: the last session, else MView's own folder.) }
+  Path := ParamStr(1);
+  Flat := False;
+  if FWelcome <> '' then
+  begin
+    { The very first start: the map of the screen, alone. }
+    Path := FWelcome;
+    Flat := True;
+  end
+  else if (Path = '') and (FMView.Config.LastDirectory = '') then
+  begin
+    Path := ExtractFilePath(ParamStr(0));
+    Flat := True;     { not the folders around MView's own }
+  end;
+  FMView.Start(Path, Flat);
+
+  { [Startup] Mode=2: side by side with Total Commander, once the window
+    is up, Total Commander in the start folder. }
+  if FMView.Config.StartMode = 2 then
+  begin
+    if Path = '' then
+      FStartFolder := FMView.Config.LastDirectory
+    else if DirectoryExists(Path) then
+      FStartFolder := Path
+    else
+      FStartFolder := ExtractFileDir(Path);
+    Application.QueueAsyncCall(@StartSideBySide, 0);
+  end;
+end;
+
+procedure TMainForm.StartSideBySide(AData: PtrInt);
+begin
+  if (FMView = nil) or FSideBySide then
+    Exit;
+  ToggleSideBySide(ExcludeTrailingPathDelimiter(FStartFolder));
 end;
 
 { Spec §8.5: the GPU renderer if OpenGL is usable (and [Renderer]
@@ -1792,7 +1877,7 @@ end;
   taskbar stays free), Total Commander the right half, in the current
   image's folder; MView's sort panel is then right next to it. Off: MView
   goes back to fullscreen or its place before; Total Commander stays. }
-procedure TMainForm.ToggleSideBySide;
+procedure TMainForm.ToggleSideBySide(const AFolder: string);
 var
   Work, LeftHalf: TRect;
   Wnd: THandle;
@@ -1845,7 +1930,7 @@ begin
   if FMView.Navigator.HasCurrentImage then
     Folder := ExcludeTrailingPathDelimiter(FMView.Navigator.CurrentDirectory)
   else
-    Folder := '';
+    Folder := AFolder;      { at the start: the start folder }
   if Exe <> '' then
   begin
     if not OpenInTotalCommander(Exe, Folder) then
